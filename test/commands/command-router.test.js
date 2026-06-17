@@ -1369,20 +1369,17 @@ test("registerCalypsoCommand force deploy bypasses blockers", async () => {
     resolveDeployAccessFn: async () => ({ canDeploy: true }),
     getLastProdDeployAtFn: async () => "1970-01-01T00:00:00.000Z",
     listBlockingPullRequestsFn: async () => [{ repo: "croft-eng/croft", pr_number: 12, status: "untested" }],
+    listDeployablePullRequestsForDeploymentFn: async () => [
+      {
+        repo: "croft-eng/croft",
+        pr_number: 12,
+        title: "Hotfix without tested",
+        url: "https://github.com/croft-eng/croft/pull/12",
+        author_login: "octocat",
+      },
+    ],
     triggerProdDeployFn: async () => ({ externalDeployId: "dep-123" }),
-    insertDeploymentFn: async () => ({ deployed_at: "2026-02-13T17:00:00.000Z" }),
-    markPullRequestsDeployedSinceFn: async () => ({
-      deployedPullRequestCount: 1,
-      deployedPullRequests: [
-        {
-          repo: "croft-eng/croft",
-          pr_number: 12,
-          title: "Hotfix without tested",
-          url: "https://github.com/croft-eng/croft/pull/12",
-          author_login: "octocat",
-        },
-      ],
-    }),
+    waitForProdDeployCompletionFn: async () => new Promise(() => {}),
     listGithubSlackUserMappingsFn: async () => new Map(),
     deployConfig: {
       digitaloceanToken: "token",
@@ -1403,13 +1400,13 @@ test("registerCalypsoCommand force deploy bypasses blockers", async () => {
   assert.match(payload.text, /Force deploy to prod is in progress/);
   assert.match(payload.text, /Triggered by <@U123>/);
   assert.match(payload.text, /Bypassed 1 blocking PR\(s\)/);
-  assert.match(payload.text, /Marked 1 PR\(s\) deployed/);
-  assert.match(payload.text, /Deployed PRs:/);
+  assert.doesNotMatch(payload.text, /Marked 1 PR\(s\) deployed/);
+  assert.match(payload.text, /PRs to deploy:/);
   assert.match(
     payload.text,
     /<https:\/\/github\.com\/croft-eng\/croft\/pull\/12\|Hotfix without tested> by octocat \(github username since no matching slack username\)\./,
   );
-  assert.deepEqual(queryCalls, ["BEGIN", "COMMIT"]);
+  assert.deepEqual(queryCalls, []);
 });
 
 test("registerCalypsoCommand blocks force deploy when must-test blockers exist", async () => {
@@ -1560,17 +1557,46 @@ test("registerCalypsoCommand sends staging deployment completion follow-up with 
 
 test("registerCalypsoCommand sends deployment completion follow-up when enabled", async () => {
   let commandHandler;
+  let insertedDeployment;
+  let markedPullRequests;
+  let markedDeployedAt;
+  let insertedWithClient;
+  let markedWithClient;
+  let transactionClientReleased = false;
+  const queryCalls = [];
+  const deployedPullRequests = [
+    {
+      repo: "croft-eng/croft",
+      pr_number: 12,
+      title: "Add deploy gate",
+      url: "https://github.com/croft-eng/croft/pull/12",
+      author_login: "octocat",
+    },
+    {
+      repo: "croft-eng/croft",
+      pr_number: 13,
+      title: "Fix flaky test",
+      url: "https://github.com/croft-eng/croft/pull/13",
+      author_login: "hubot",
+    },
+  ];
   const app = {
     command(_name, handler) {
       commandHandler = handler;
     },
   };
-  const pool = {
+  const transactionClient = {
     async query(sql) {
-      if (sql === "BEGIN" || sql === "COMMIT") {
-        return { rows: [] };
-      }
+      queryCalls.push(sql);
       return { rows: [] };
+    },
+    release() {
+      transactionClientReleased = true;
+    },
+  };
+  const pool = {
+    async connect() {
+      return transactionClient;
     },
   };
 
@@ -1580,10 +1606,27 @@ test("registerCalypsoCommand sends deployment completion follow-up when enabled"
     resolveDeployAccessFn: async () => ({ canDeploy: true }),
     getLastProdDeployAtFn: async () => "1970-01-01T00:00:00.000Z",
     listBlockingPullRequestsFn: async () => [],
+    listDeployablePullRequestsForDeploymentFn: async () => deployedPullRequests,
     triggerProdDeployFn: async () => ({ externalDeployId: "dep-abc" }),
-    insertDeploymentFn: async () => ({ deployed_at: "2026-02-13T17:00:00.000Z" }),
-    markPullRequestsDeployedSinceFn: async () => 2,
+    insertDeploymentFn: async (client, deployment) => {
+      insertedWithClient = client;
+      insertedDeployment = deployment;
+      return { deployed_at: deployment.deployedAt };
+    },
+    markPullRequestsDeployedFn: async (client, pullRequests, deployedAt) => {
+      markedWithClient = client;
+      markedPullRequests = pullRequests;
+      markedDeployedAt = deployedAt;
+      return {
+        deployedPullRequestCount: pullRequests.length,
+        deployedPullRequests: pullRequests.map((pullRequest) => ({
+          ...pullRequest,
+          deployed_at: deployedAt,
+        })),
+      };
+    },
     waitForProdDeployCompletionFn: async () => ({ id: "dep-abc", phase: "ACTIVE" }),
+    listGithubSlackUserMappingsFn: async () => new Map([["octocat", "U123ABC"]]),
     deployConfig: {
       digitaloceanToken: "token",
       doAppIdProd: "app-id",
@@ -1604,15 +1647,30 @@ test("registerCalypsoCommand sends deployment completion follow-up when enabled"
   assert.equal(responses.length, 2);
   assert.equal(responses[0].response_type, "in_channel");
   assert.match(responses[0].text, /Deploy to prod is in progress \(id: dep-abc\)/);
+  assert.match(responses[0].text, /PRs to deploy:/);
+  assert.doesNotMatch(responses[0].text, /Marked 2 PR\(s\) deployed/);
   assert.equal(responses[1].response_type, "in_channel");
   assert.match(
     responses[1].text,
     /Deployment dep-abc finished successfully with phase ACTIVE/,
   );
+  assert.match(responses[1].text, /Marked 2 PR\(s\) deployed/);
+  assert.match(responses[1].text, /Deployed PRs:/);
+  assert.match(responses[1].text, /<https:\/\/github\.com\/croft-eng\/croft\/pull\/12\|Add deploy gate> by <@U123ABC>\./);
+  assert.deepEqual(queryCalls, ["BEGIN", "COMMIT"]);
+  assert.equal(insertedDeployment.externalDeployId, "dep-abc");
+  assert.ok(insertedDeployment.deployedAt instanceof Date);
+  assert.deepEqual(markedPullRequests, deployedPullRequests);
+  assert.equal(markedDeployedAt, insertedDeployment.deployedAt);
+  assert.equal(insertedWithClient, transactionClient);
+  assert.equal(markedWithClient, transactionClient);
+  assert.equal(transactionClientReleased, true);
 });
 
 test("registerCalypsoCommand tags here when deployment completion fails", async () => {
   let commandHandler;
+  let inserted = false;
+  let marked = false;
   const app = {
     command(_name, handler) {
       commandHandler = handler;
@@ -1633,9 +1691,14 @@ test("registerCalypsoCommand tags here when deployment completion fails", async 
     resolveDeployAccessFn: async () => ({ canDeploy: true }),
     getLastProdDeployAtFn: async () => "1970-01-01T00:00:00.000Z",
     listBlockingPullRequestsFn: async () => [],
+    listDeployablePullRequestsForDeploymentFn: async () => [],
     triggerProdDeployFn: async () => ({ externalDeployId: "dep-abc" }),
-    insertDeploymentFn: async () => ({ deployed_at: "2026-02-13T17:00:00.000Z" }),
-    markPullRequestsDeployedSinceFn: async () => 0,
+    insertDeploymentFn: async () => {
+      inserted = true;
+    },
+    markPullRequestsDeployedFn: async () => {
+      marked = true;
+    },
     waitForProdDeployCompletionFn: async () => {
       throw new Error("deployment errored");
     },
@@ -1662,6 +1725,69 @@ test("registerCalypsoCommand tags here when deployment completion fails", async 
     responses[1].text,
     /<!here> Deployment dep-abc failed after trigger: deployment errored/,
   );
+  assert.match(responses[1].text, /No deploy records or PR statuses were committed/);
+  assert.equal(inserted, false);
+  assert.equal(marked, false);
+});
+
+test("registerCalypsoCommand does not finalize production deployment without external deployment id", async () => {
+  let commandHandler;
+  let inserted = false;
+  let marked = false;
+  const app = {
+    command(_name, handler) {
+      commandHandler = handler;
+    },
+  };
+
+  registerCalypsoCommand(app, {
+    enableDeploymentCompletionNotifications: true,
+    pool: {},
+    resolveDeployAccessFn: async () => ({ canDeploy: true }),
+    getLastProdDeployAtFn: async () => "1970-01-01T00:00:00.000Z",
+    listBlockingPullRequestsFn: async () => [],
+    listDeployablePullRequestsForDeploymentFn: async () => [
+      {
+        repo: "croft-eng/croft",
+        pr_number: 12,
+        title: "Add deploy gate",
+        url: "https://github.com/croft-eng/croft/pull/12",
+        author_login: "octocat",
+      },
+    ],
+    triggerProdDeployFn: async () => ({ externalDeployId: null }),
+    insertDeploymentFn: async () => {
+      inserted = true;
+    },
+    markPullRequestsDeployedFn: async () => {
+      marked = true;
+    },
+    waitForProdDeployCompletionFn: async () => {
+      throw new Error("should not wait without deployment id");
+    },
+    listGithubSlackUserMappingsFn: async () => new Map(),
+    deployConfig: {
+      digitaloceanToken: "token",
+      doAppIdProd: "app-id",
+    },
+  });
+
+  const responses = [];
+  await commandHandler({
+    command: { text: "deploy prod", user_id: "U123" },
+    ack: async () => {},
+    respond: async (message) => {
+      responses.push(message);
+    },
+  });
+
+  assert.equal(responses.length, 1);
+  assert.equal(responses[0].response_type, "in_channel");
+  assert.match(responses[0].text, /Deploy to prod is in progress \(id: n\/a\)/);
+  assert.match(responses[0].text, /will not mark PRs deployed automatically/);
+  assert.match(responses[0].text, /PRs to deploy:/);
+  assert.equal(inserted, false);
+  assert.equal(marked, false);
 });
 
 test("registerCalypsoCommand returns deploy not configured when clear", async () => {
@@ -1725,9 +1851,25 @@ test("registerCalypsoCommand returns staging deploy not configured when staging 
   assert.match(payload.text, /Deploy to staging is not configured/);
 });
 
-test("registerCalypsoCommand triggers deploy and records deployment when clear and configured", async () => {
+test("registerCalypsoCommand triggers deploy and reports planned PRs when clear and configured", async () => {
   let commandHandler;
   const queryCalls = [];
+  const plannedPullRequests = [
+    {
+      repo: "croft-eng/croft",
+      pr_number: 12,
+      title: "Add deploy gate",
+      url: "https://github.com/croft-eng/croft/pull/12",
+      author_login: "octocat",
+    },
+    {
+      repo: "croft-eng/croft",
+      pr_number: 13,
+      title: "Fix flaky test",
+      url: "https://github.com/croft-eng/croft/pull/13",
+      author_login: "hubot",
+    },
+  ];
   const app = {
     command(_name, handler) {
       commandHandler = handler;
@@ -1745,27 +1887,9 @@ test("registerCalypsoCommand triggers deploy and records deployment when clear a
     resolveDeployAccessFn: async () => ({ canDeploy: true }),
     getLastProdDeployAtFn: async () => "1970-01-01T00:00:00.000Z",
     listBlockingPullRequestsFn: async () => [],
+    listDeployablePullRequestsForDeploymentFn: async () => plannedPullRequests,
     triggerProdDeployFn: async () => ({ externalDeployId: "dep-123" }),
-    insertDeploymentFn: async () => ({ deployed_at: "2026-02-13T17:00:00.000Z" }),
-    markPullRequestsDeployedSinceFn: async () => ({
-      deployedPullRequestCount: 2,
-      deployedPullRequests: [
-        {
-          repo: "croft-eng/croft",
-          pr_number: 12,
-          title: "Add deploy gate",
-          url: "https://github.com/croft-eng/croft/pull/12",
-          author_login: "octocat",
-        },
-        {
-          repo: "croft-eng/croft",
-          pr_number: 13,
-          title: "Fix flaky test",
-          url: "https://github.com/croft-eng/croft/pull/13",
-          author_login: "hubot",
-        },
-      ],
-    }),
+    waitForProdDeployCompletionFn: async () => new Promise(() => {}),
     listGithubSlackUserMappingsFn: async () => new Map([["octocat", "U123ABC"]]),
     deployConfig: {
       digitaloceanToken: "token",
@@ -1785,14 +1909,14 @@ test("registerCalypsoCommand triggers deploy and records deployment when clear a
   assert.equal(payload.response_type, "in_channel");
   assert.match(payload.text, /Deploy to prod is in progress/);
   assert.match(payload.text, /Triggered by <@U123>/);
-  assert.match(payload.text, /Marked 2 PR\(s\) deployed/);
-  assert.match(payload.text, /Deployed PRs:/);
+  assert.doesNotMatch(payload.text, /Marked 2 PR\(s\) deployed/);
+  assert.match(payload.text, /PRs to deploy:/);
   assert.match(payload.text, /<https:\/\/github\.com\/croft-eng\/croft\/pull\/12\|Add deploy gate> by <@U123ABC>\./);
   assert.match(
     payload.text,
     /<https:\/\/github\.com\/croft-eng\/croft\/pull\/13\|Fix flaky test> by hubot \(github username since no matching slack username\)\./,
   );
-  assert.deepEqual(queryCalls, ["BEGIN", "COMMIT"]);
+  assert.deepEqual(queryCalls, []);
 });
 
 test("registerCalypsoCommand formats mapped slack user IDs as uppercase mentions", async () => {
@@ -1815,20 +1939,17 @@ test("registerCalypsoCommand formats mapped slack user IDs as uppercase mentions
     resolveDeployAccessFn: async () => ({ canDeploy: true }),
     getLastProdDeployAtFn: async () => "1970-01-01T00:00:00.000Z",
     listBlockingPullRequestsFn: async () => [],
+    listDeployablePullRequestsForDeploymentFn: async () => [
+      {
+        repo: "croft-eng/croft",
+        pr_number: 12,
+        title: "Add deploy gate",
+        url: "https://github.com/croft-eng/croft/pull/12",
+        author_login: "octocat",
+      },
+    ],
     triggerProdDeployFn: async () => ({ externalDeployId: "dep-123" }),
-    insertDeploymentFn: async () => ({ deployed_at: "2026-02-13T17:00:00.000Z" }),
-    markPullRequestsDeployedSinceFn: async () => ({
-      deployedPullRequestCount: 1,
-      deployedPullRequests: [
-        {
-          repo: "croft-eng/croft",
-          pr_number: 12,
-          title: "Add deploy gate",
-          url: "https://github.com/croft-eng/croft/pull/12",
-          author_login: "octocat",
-        },
-      ],
-    }),
+    waitForProdDeployCompletionFn: async () => new Promise(() => {}),
     listGithubSlackUserMappingsFn: async () => new Map([["octocat", "u123abc"]]),
     deployConfig: {
       digitaloceanToken: "token",
@@ -1847,7 +1968,7 @@ test("registerCalypsoCommand formats mapped slack user IDs as uppercase mentions
 
   assert.equal(payload.response_type, "in_channel");
   assert.match(payload.text, /<https:\/\/github\.com\/croft-eng\/croft\/pull\/12\|Add deploy gate> by <@U123ABC>\./);
-  assert.deepEqual(queryCalls, ["BEGIN", "COMMIT"]);
+  assert.deepEqual(queryCalls, []);
 });
 
 test("registerCalypsoCommand does not mutate DB when deploy call fails", async () => {
@@ -1872,13 +1993,14 @@ test("registerCalypsoCommand does not mutate DB when deploy call fails", async (
     resolveDeployAccessFn: async () => ({ canDeploy: true }),
     getLastProdDeployAtFn: async () => "1970-01-01T00:00:00.000Z",
     listBlockingPullRequestsFn: async () => [],
+    listDeployablePullRequestsForDeploymentFn: async () => [],
     triggerProdDeployFn: async () => {
       throw new Error("deploy failed");
     },
     insertDeploymentFn: async () => {
       inserted = true;
     },
-    markPullRequestsDeployedSinceFn: async () => {
+    markPullRequestsDeployedFn: async () => {
       marked = true;
     },
     deployConfig: {
@@ -1902,7 +2024,7 @@ test("registerCalypsoCommand does not mutate DB when deploy call fails", async (
   assert.match(payload.text, /Deploy failed before deployment state was committed/);
 });
 
-test("registerCalypsoCommand reports rollback when deployment state transaction fails", async () => {
+test("registerCalypsoCommand reports rollback when deployment finalization transaction fails", async () => {
   let commandHandler;
   let marked = false;
   const queryCalls = [];
@@ -1919,35 +2041,51 @@ test("registerCalypsoCommand reports rollback when deployment state transaction 
   };
 
   registerCalypsoCommand(app, {
+    enableDeploymentCompletionNotifications: true,
     pool,
     resolveDeployAccessFn: async () => ({ canDeploy: true }),
     getLastProdDeployAtFn: async () => "1970-01-01T00:00:00.000Z",
     listBlockingPullRequestsFn: async () => [],
+    listDeployablePullRequestsForDeploymentFn: async () => [
+      {
+        repo: "croft-eng/croft",
+        pr_number: 12,
+        title: "Add deploy gate",
+        url: "https://github.com/croft-eng/croft/pull/12",
+        author_login: "octocat",
+      },
+    ],
     triggerProdDeployFn: async () => ({ externalDeployId: "dep-123" }),
     insertDeploymentFn: async () => {
       throw new Error("insert failed");
     },
-    markPullRequestsDeployedSinceFn: async () => {
+    markPullRequestsDeployedFn: async () => {
       marked = true;
     },
+    waitForProdDeployCompletionFn: async () => ({ id: "dep-123", phase: "ACTIVE" }),
+    listGithubSlackUserMappingsFn: async () => new Map(),
     deployConfig: {
       digitaloceanToken: "token",
       doAppIdProd: "app-id",
     },
   });
 
-  let payload;
+  const responses = [];
   await commandHandler({
     command: { text: "deploy prod", user_id: "U123" },
     ack: async () => {},
     respond: async (message) => {
-      payload = message;
+      responses.push(message);
     },
   });
 
   assert.equal(marked, false);
   assert.deepEqual(queryCalls, ["BEGIN", "ROLLBACK"]);
-  assert.match(payload.text, /Transaction was rolled back/);
+  assert.equal(responses.length, 2);
+  assert.match(responses[1].text, /Deployment dep-123 finished/);
+  assert.match(responses[1].text, /could not commit deployment state/);
+  assert.match(responses[1].text, /Deployment state transaction rolled back/);
+  assert.match(responses[1].text, /No deploy records or PR statuses were committed/);
 });
 
 test("registerCalypsoCommand whitelist command denies non-admin, non-whitelisted user", async () => {

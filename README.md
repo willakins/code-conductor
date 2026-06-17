@@ -57,7 +57,7 @@ OpenAI or Anthropic, and can poll Sentry or Rollbar for newly tracked unresolved
   - `/calypso deploy prod`
 - Enforces deploy blocking rules:
   - A blocker is any PR with `merged_at > last_prod_deploy_at` and `status` not in `tested`, `deployed`.
-- Optionally triggers deploy-platform production deploy when gate is clear.
+- Optionally triggers deploy-platform production deploy when gate is clear, then records deployed PRs only after provider completion succeeds.
 - Optionally triggers staging deploy directly when staging app/pipeline is configured.
 - Optionally polls one configured environment URL and posts transition-based outage/recovery alerts.
 - Optionally polls one configured Sentry or Rollbar project/environment scope and posts one alert per new or regressed unresolved issue group.
@@ -1022,11 +1022,18 @@ Rules:
 - Access restricted to workspace admins and whitelisted users.
 - Blocks when channel topic marks production as red.
 - If no blockers and DigitalOcean env vars missing, returns "deploy not configured".
-- If configured and deploy succeeds:
-  - inserts a `deployments` row
-  - marks tested PRs since last deploy as `deployed`
+- If configured and deploy is initiated:
   - shows the triggering Slack user as a Slack mention
-  - includes a `Deployed PRs` list in the response with PR title links and mapped author handles
+  - includes a `PRs to deploy` list with PR title links and mapped author handles
+  - does not insert a `deployments` row yet
+  - does not mark PRs as `deployed` yet
+- After the deploy provider reports success:
+  - inserts a `deployments` row
+  - marks only the planned PRs as `deployed`
+  - includes a `Deployed PRs` list in the follow-up response
+- If the provider does not return an external deployment id:
+  - does not write deployment row
+  - does not mark PRs deployed
 - If deploy fails:
   - does not write deployment row
   - does not mark PRs deployed
@@ -1047,8 +1054,8 @@ Rules:
 - Bypasses blocker checks and triggers deploy anyway.
 - Cannot bypass blockers that are explicitly marked as must-test.
 - Still requires deploy configuration (`DEPLOY_TOKEN`, `DEPLOY_PROD_APP_ID`).
-- Marks merged PRs since last prod deploy as `deployed`, even if they were `untested`.
-- Includes those PRs in the `Deployed PRs` response list.
+- Lists the tested and bypassed untested PRs that are planned for deployment.
+- Marks only those planned PRs as `deployed` after the provider reports success.
 
 ## Review Recap
 
