@@ -125,47 +125,53 @@ class DeployCommand extends BaseCalypsoCommand {
     }
 
     try {
+      const productionDeploymentPlan = isProductionDeploy
+        ? await this.readProductionDeploymentPlan({
+            runtime,
+            lastProductionDeploymentAt: deployGateState.lastProductionDeploymentAt,
+            includeUntested: forceDeployment,
+          })
+        : null;
       const deployResult = await runtime.triggerProdDeployFn(deployConfiguration);
       const deploymentTriggeredBy = await this.resolveDeploymentTriggeredBy(runtime);
       const deployProvider =
         deployResult.deployProvider || deployConfiguration.deployProvider || "digitalocean";
-      let deploymentSummary = {
-        deployedPullRequestCount: 0,
-        deployedPullRequests: [],
-        externalDeploymentId: deployResult.externalDeployId,
-      };
-
-      if (isProductionDeploy) {
-        deploymentSummary = await this.recordDeploymentAndMarkPullRequests({
-          runtime,
-          lastProductionDeploymentAt: deployGateState.lastProductionDeploymentAt,
-          externalDeploymentId: deployResult.externalDeployId,
-          provider: deployProvider,
-        });
-      }
-
-      const deploymentId = deploymentSummary.externalDeploymentId || "n/a";
+      const externalDeploymentId = deployResult.externalDeployId || null;
+      const deploymentId = externalDeploymentId || "n/a";
       const shouldNotifyDeploymentCompletion =
         runtime.enableDeploymentCompletionNotifications &&
-        Boolean(deploymentSummary.externalDeploymentId);
-      const deployedPullRequestSummaryText = isProductionDeploy
-        ? await this.buildDeployedPullRequestSummary({
+        Boolean(externalDeploymentId);
+      const plannedPullRequestSummaryText = isProductionDeploy
+        ? await this.buildPlannedPullRequestSummary({
             runtime,
-            deployedPullRequestCount: deploymentSummary.deployedPullRequestCount,
-            deployedPullRequests: deploymentSummary.deployedPullRequests,
+            plannedPullRequests: productionDeploymentPlan.plannedPullRequests,
           })
         : "";
+      const missingDeploymentIdText =
+        isProductionDeploy && !externalDeploymentId
+          ? "Calypso will not mark PRs deployed automatically because the deploy provider did not return a deployment id."
+          : "";
+
       if (isProductionDeploy && forceDeployment && blockingPullRequestCount > 0) {
         return this.buildExecutionResult(
-          this.appendDeployedPullRequestSummary(
-            `Force deploy to prod is in progress (id: ${deploymentId}). Triggered by ${deploymentTriggeredBy}. Bypassed ${blockingPullRequestCount} blocking PR(s). Marked ${deploymentSummary.deployedPullRequestCount} PR(s) deployed.`,
-            deployedPullRequestSummaryText,
+          this.appendDeploymentSummary(
+            [
+              `Force deploy to prod is in progress (id: ${deploymentId}). Triggered by ${deploymentTriggeredBy}. Bypassed ${blockingPullRequestCount} blocking PR(s).`,
+              missingDeploymentIdText,
+            ].filter(Boolean).join(" "),
+            plannedPullRequestSummaryText,
           ),
           this.buildDeploymentExecutionFields({
-            externalDeploymentId: deploymentSummary.externalDeploymentId,
+            externalDeploymentId,
             deployProvider,
             shouldNotifyDeploymentCompletion,
             deployConfigOverrides: this.buildDeployConfigOverridesForCompletion(deployConfiguration),
+            productionDeploymentFinalization: this.buildProductionDeploymentFinalization({
+              isProductionDeploy,
+              externalDeploymentId,
+              deployProvider,
+              productionDeploymentPlan,
+            }),
           }),
         );
       }
@@ -174,7 +180,7 @@ class DeployCommand extends BaseCalypsoCommand {
         return this.buildExecutionResult(
           `Deploy to staging is in progress (id: ${deploymentId}). Triggered by ${deploymentTriggeredBy}.`,
           this.buildDeploymentExecutionFields({
-            externalDeploymentId: deploymentSummary.externalDeploymentId,
+            externalDeploymentId,
             deployProvider,
             shouldNotifyDeploymentCompletion,
             deployConfigOverrides: this.buildDeployConfigOverridesForCompletion(deployConfiguration),
@@ -183,24 +189,27 @@ class DeployCommand extends BaseCalypsoCommand {
       }
 
       return this.buildExecutionResult(
-        this.appendDeployedPullRequestSummary(
-          `Deploy to prod is in progress (id: ${deploymentId}). Triggered by ${deploymentTriggeredBy}. Marked ${deploymentSummary.deployedPullRequestCount} PR(s) deployed.`,
-          deployedPullRequestSummaryText,
+        this.appendDeploymentSummary(
+          [
+            `Deploy to prod is in progress (id: ${deploymentId}). Triggered by ${deploymentTriggeredBy}.`,
+            missingDeploymentIdText,
+          ].filter(Boolean).join(" "),
+          plannedPullRequestSummaryText,
         ),
         this.buildDeploymentExecutionFields({
-          externalDeploymentId: deploymentSummary.externalDeploymentId,
+          externalDeploymentId,
           deployProvider,
           shouldNotifyDeploymentCompletion,
           deployConfigOverrides: this.buildDeployConfigOverridesForCompletion(deployConfiguration),
+          productionDeploymentFinalization: this.buildProductionDeploymentFinalization({
+            isProductionDeploy,
+            externalDeploymentId,
+            deployProvider,
+            productionDeploymentPlan,
+          }),
         }),
       );
     } catch (error) {
-      if (this.didDeploymentTransactionRollback(error)) {
-        return this.buildExecutionResult(
-          "Deploy failed while recording deployment state. Transaction was rolled back; no deploy records or PR statuses were committed.",
-        );
-      }
-
       return this.buildExecutionResult(
         `Deploy failed before deployment state was committed: ${error.message}`,
       );
@@ -217,6 +226,25 @@ class DeployCommand extends BaseCalypsoCommand {
     return {
       blockingPullRequests,
       lastProductionDeploymentAt,
+    };
+  }
+
+  async readProductionDeploymentPlan({
+    runtime,
+    lastProductionDeploymentAt,
+    includeUntested,
+  }) {
+    const deploymentCutoffAt = new Date();
+    const plannedPullRequests = await runtime.listDeployablePullRequestsForDeploymentFn(
+      runtime.pool,
+      lastProductionDeploymentAt,
+      deploymentCutoffAt,
+      { includeUntested },
+    );
+
+    return {
+      deploymentCutoffAt,
+      plannedPullRequests: normalizeDeployedPullRequests(plannedPullRequests),
     };
   }
 
@@ -321,38 +349,7 @@ class DeployCommand extends BaseCalypsoCommand {
     return "unknown user";
   }
 
-  async recordDeploymentAndMarkPullRequests({
-    runtime,
-    lastProductionDeploymentAt,
-    externalDeploymentId,
-    provider,
-  }) {
-    return this.withDatabaseTransaction(runtime.pool, async () => {
-      const deploymentRecord = await runtime.insertDeploymentFn(runtime.pool, {
-        environment: "prod",
-        provider: provider || runtime.deployConfig.deployProvider || "digitalocean",
-        externalDeployId: externalDeploymentId,
-      });
-
-      const deployedPullRequestMarkingResult = await runtime.markPullRequestsDeployedSinceFn(
-        runtime.pool,
-        lastProductionDeploymentAt,
-        deploymentRecord.deployed_at,
-      );
-      const normalizedDeployedPullRequestMarkingResult =
-        normalizeDeployedPullRequestMarkingResult(deployedPullRequestMarkingResult);
-
-      return {
-        deployedPullRequestCount:
-          normalizedDeployedPullRequestMarkingResult.deployedPullRequestCount,
-        deployedPullRequests:
-          normalizedDeployedPullRequestMarkingResult.deployedPullRequests,
-        externalDeploymentId,
-      };
-    });
-  }
-
-  appendDeployedPullRequestSummary(baseText, deployedPullRequestSummaryText) {
+  appendDeploymentSummary(baseText, deployedPullRequestSummaryText) {
     const normalizedSummaryText = String(deployedPullRequestSummaryText || "").trim();
     if (normalizedSummaryText === "") {
       return baseText;
@@ -361,86 +358,14 @@ class DeployCommand extends BaseCalypsoCommand {
     return `${baseText}\n${normalizedSummaryText}`;
   }
 
-  async buildDeployedPullRequestSummary({
-    runtime,
-    deployedPullRequestCount,
-    deployedPullRequests,
-  }) {
-    const normalizedDeployedPullRequests = normalizeDeployedPullRequests(deployedPullRequests);
-    if (normalizedDeployedPullRequests.length === 0) {
-      const parsedDeployedPullRequestCount = Number(deployedPullRequestCount);
-      if (Number.isFinite(parsedDeployedPullRequestCount) && parsedDeployedPullRequestCount > 0) {
-        return `Deployed PRs:\n• ${parsedDeployedPullRequestCount} PR(s) deployed (details unavailable).`;
-      }
-      return "Deployed PRs:\n• none.";
-    }
-
-    const githubUsernames = [...new Set(
-      normalizedDeployedPullRequests
-        .map((pullRequest) => normalizeGithubUsername(pullRequest.author_login))
-        .filter(Boolean),
-    )];
-    const slackUsernameByGithubUsername = await this.resolveSlackUsernameByGithubUsername({
+  async buildPlannedPullRequestSummary({ runtime, plannedPullRequests }) {
+    return buildDeploymentPullRequestSummary({
       runtime,
-      githubUsernames,
+      heading: "PRs to deploy:",
+      pullRequestCount: plannedPullRequests.length,
+      pullRequests: plannedPullRequests,
+      detailsUnavailableText: "PR(s) planned for deployment (details unavailable).",
     });
-
-    return [
-      "Deployed PRs:",
-      ...normalizedDeployedPullRequests.map((pullRequest) =>
-        formatDeployedPullRequestLine({
-          pullRequest,
-          slackUsernameByGithubUsername,
-        }),
-      ),
-    ].join("\n");
-  }
-
-  async resolveSlackUsernameByGithubUsername({ runtime, githubUsernames }) {
-    if (!runtime.pool || typeof runtime.listGithubSlackUserMappingsFn !== "function") {
-      return new Map();
-    }
-
-    try {
-      const githubToSlackUserMapping = await runtime.listGithubSlackUserMappingsFn(
-        runtime.pool,
-        githubUsernames,
-      );
-      return normalizeGithubToSlackUserMapping(githubToSlackUserMapping);
-    } catch (_error) {
-      return new Map();
-    }
-  }
-
-  async withDatabaseTransaction(pool, transactionalWork) {
-    let transactionStarted = false;
-
-    try {
-      await pool.query("BEGIN");
-      transactionStarted = true;
-
-      const result = await transactionalWork();
-
-      await pool.query("COMMIT");
-      transactionStarted = false;
-      return result;
-    } catch (error) {
-      if (transactionStarted) {
-        await pool.query("ROLLBACK");
-        throw this.buildRolledBackDeploymentError(error);
-      }
-      throw error;
-    }
-  }
-
-  buildRolledBackDeploymentError(cause) {
-    const rolledBackError = new Error("Deployment state transaction rolled back.", { cause });
-    rolledBackError.code = "DEPLOY_STATE_ROLLED_BACK";
-    return rolledBackError;
-  }
-
-  didDeploymentTransactionRollback(error) {
-    return Boolean(error) && error.code === "DEPLOY_STATE_ROLLED_BACK";
   }
 
   resolveResponseType({ executionResult }) {
@@ -460,6 +385,7 @@ class DeployCommand extends BaseCalypsoCommand {
     deployProvider,
     shouldNotifyDeploymentCompletion,
     deployConfigOverrides,
+    productionDeploymentFinalization,
   }) {
     return {
       deployTriggered: true,
@@ -467,37 +393,28 @@ class DeployCommand extends BaseCalypsoCommand {
       deployProvider: deployProvider || null,
       deployConfigOverrides: deployConfigOverrides || {},
       shouldNotifyDeploymentCompletion,
+      shouldFinalizeProductionDeployment: Boolean(productionDeploymentFinalization),
+      productionDeploymentFinalization: productionDeploymentFinalization || null,
     };
   }
-}
 
-function normalizeDeployedPullRequestMarkingResult(markingResult) {
-  if (typeof markingResult === "number" && Number.isFinite(markingResult)) {
+  buildProductionDeploymentFinalization({
+    isProductionDeploy,
+    externalDeploymentId,
+    deployProvider,
+    productionDeploymentPlan,
+  }) {
+    if (!isProductionDeploy || !externalDeploymentId || !productionDeploymentPlan) {
+      return null;
+    }
+
     return {
-      deployedPullRequestCount: markingResult,
-      deployedPullRequests: [],
+      externalDeploymentId,
+      deployProvider,
+      deploymentCutoffAt: productionDeploymentPlan.deploymentCutoffAt,
+      plannedPullRequests: productionDeploymentPlan.plannedPullRequests,
     };
   }
-
-  if (!markingResult || typeof markingResult !== "object") {
-    return {
-      deployedPullRequestCount: 0,
-      deployedPullRequests: [],
-    };
-  }
-
-  const deployedPullRequests = normalizeDeployedPullRequests(
-    markingResult.deployedPullRequests || markingResult.pullRequests,
-  );
-  const parsedCount = Number(markingResult.deployedPullRequestCount);
-  const deployedPullRequestCount = Number.isFinite(parsedCount)
-    ? parsedCount
-    : deployedPullRequests.length;
-
-  return {
-    deployedPullRequestCount,
-    deployedPullRequests,
-  };
 }
 
 function readForceDeployBlockedPullRequests(blockingPullRequests) {
@@ -525,6 +442,59 @@ function normalizeDeployedPullRequests(deployedPullRequests) {
       author_login: String(pullRequest?.author_login || "").trim() || null,
     }))
     .filter((pullRequest) => Boolean(pullRequest.repo) && pullRequest.pr_number !== undefined);
+}
+
+async function buildDeploymentPullRequestSummary({
+  runtime,
+  heading,
+  pullRequestCount,
+  pullRequests,
+  detailsUnavailableText,
+}) {
+  const normalizedDeployedPullRequests = normalizeDeployedPullRequests(pullRequests);
+  if (normalizedDeployedPullRequests.length === 0) {
+    const parsedPullRequestCount = Number(pullRequestCount);
+    if (Number.isFinite(parsedPullRequestCount) && parsedPullRequestCount > 0) {
+      return `${heading}\n• ${parsedPullRequestCount} ${detailsUnavailableText}`;
+    }
+    return `${heading}\n• none.`;
+  }
+
+  const githubUsernames = [...new Set(
+    normalizedDeployedPullRequests
+      .map((pullRequest) => normalizeGithubUsername(pullRequest.author_login))
+      .filter(Boolean),
+  )];
+  const slackUsernameByGithubUsername = await resolveSlackUsernameByGithubUsername({
+    runtime,
+    githubUsernames,
+  });
+
+  return [
+    heading,
+    ...normalizedDeployedPullRequests.map((pullRequest) =>
+      formatDeployedPullRequestLine({
+        pullRequest,
+        slackUsernameByGithubUsername,
+      }),
+    ),
+  ].join("\n");
+}
+
+async function resolveSlackUsernameByGithubUsername({ runtime, githubUsernames }) {
+  if (!runtime.pool || typeof runtime.listGithubSlackUserMappingsFn !== "function") {
+    return new Map();
+  }
+
+  try {
+    const githubToSlackUserMapping = await runtime.listGithubSlackUserMappingsFn(
+      runtime.pool,
+      githubUsernames,
+    );
+    return normalizeGithubToSlackUserMapping(githubToSlackUserMapping);
+  } catch (_error) {
+    return new Map();
+  }
 }
 
 function normalizeGithubToSlackUserMapping(githubToSlackUserMapping) {
@@ -692,4 +662,5 @@ function readEnvironmentTopicSegment(topicText, deployEnvironment) {
 
 module.exports = {
   DeployCommand,
+  buildDeploymentPullRequestSummary,
 };

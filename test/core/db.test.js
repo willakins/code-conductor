@@ -9,12 +9,15 @@ const {
   getRuntimeProviderConfig,
   getReviewRecapConfig,
   isUserWhitelistedForDeploy,
+  insertDeployment,
+  listDeployablePullRequestsForDeployment,
   listBlockingPullRequests,
   listGithubSlackUserMappings,
   listOpenPullRequestsForReviewRecapSince,
   listOpenPullRequestsWaitingOnReviewSince,
   listRecentlyTestedPullRequests,
   markAllUntestedPullRequestsTested,
+  markPullRequestsDeployed,
   markPullRequestsDeployedSince,
   setConfiguredCodeHostProvider,
   setConfiguredCommunicationProvider,
@@ -145,6 +148,60 @@ test("listBlockingPullRequests returns blocker rows including force-deploy flag"
   assert.deepEqual(rows, [row]);
   assert.match(captured.sql, /force_deploy_blocked/);
   assert.deepEqual(captured.params, [sinceTimestamp]);
+});
+
+test("listDeployablePullRequestsForDeployment returns tested PRs up to deployment cutoff", async () => {
+  const sinceTimestamp = new Date("2026-02-12T00:00:00.000Z");
+  const deploymentCutoffAt = new Date("2026-02-13T17:00:00.000Z");
+  const row = {
+    repo: "croft-eng/croft",
+    pr_number: 77,
+    status: "tested",
+    author_login: "octocat",
+  };
+  const captured = {};
+  const pool = {
+    async query(sql, params) {
+      captured.sql = sql;
+      captured.params = params;
+      return { rows: [row] };
+    },
+  };
+
+  const rows = await listDeployablePullRequestsForDeployment(
+    pool,
+    sinceTimestamp,
+    deploymentCutoffAt,
+  );
+
+  assert.deepEqual(rows, [row]);
+  assert.match(captured.sql, /merged_at > \$1/);
+  assert.match(captured.sql, /merged_at <= \$2/);
+  assert.match(captured.sql, /status = ANY\(\$3::text\[\]\)/);
+  assert.match(captured.sql, /author_login/);
+  assert.deepEqual(captured.params, [sinceTimestamp, deploymentCutoffAt, ["tested"]]);
+});
+
+test("listDeployablePullRequestsForDeployment includes untested PRs for force deploy", async () => {
+  const sinceTimestamp = new Date("2026-02-12T00:00:00.000Z");
+  const deploymentCutoffAt = new Date("2026-02-13T17:00:00.000Z");
+  const captured = {};
+  const pool = {
+    async query(sql, params) {
+      captured.sql = sql;
+      captured.params = params;
+      return { rows: [] };
+    },
+  };
+
+  await listDeployablePullRequestsForDeployment(
+    pool,
+    sinceTimestamp,
+    deploymentCutoffAt,
+    { includeUntested: true },
+  );
+
+  assert.deepEqual(captured.params, [sinceTimestamp, deploymentCutoffAt, ["tested", "untested"]]);
 });
 
 test("setPullRequestForceDeployBlocked updates most recent pull request flag", async () => {
@@ -342,6 +399,36 @@ test("listGithubSlackUserMappings returns mapping map by normalized github usern
   assert.deepEqual(result, new Map([["octocat", "willa"]]));
 });
 
+test("insertDeployment uses provided deployed timestamp when present", async () => {
+  const deployedAt = new Date("2026-02-13T17:00:00.000Z");
+  const captured = {};
+  const row = {
+    id: 1,
+    environment: "prod",
+    provider: "digitalocean",
+    external_deploy_id: "dep-123",
+    deployed_at: deployedAt,
+  };
+  const pool = {
+    async query(sql, params) {
+      captured.sql = sql;
+      captured.params = params;
+      return { rows: [row] };
+    },
+  };
+
+  const result = await insertDeployment(pool, {
+    environment: "prod",
+    provider: "digitalocean",
+    externalDeployId: "dep-123",
+    deployedAt,
+  });
+
+  assert.deepEqual(result, row);
+  assert.match(captured.sql, /COALESCE\(\$4, NOW\(\)\)/);
+  assert.deepEqual(captured.params, ["prod", "digitalocean", "dep-123", deployedAt]);
+});
+
 test("markPullRequestsDeployedSince returns deployed count and pull request details", async () => {
   const captured = {};
   const sinceTimestamp = new Date("2026-02-12T00:00:00.000Z");
@@ -374,6 +461,65 @@ test("markPullRequestsDeployedSince returns deployed count and pull request deta
   assert.deepEqual(result, {
     deployedPullRequestCount: 1,
     deployedPullRequests: [row],
+  });
+});
+
+test("markPullRequestsDeployed marks only exact normalized pull request targets", async () => {
+  const deployedAt = new Date("2026-02-13T00:00:00.000Z");
+  const row = {
+    repo: "croft-eng/croft",
+    pr_number: 42,
+    title: "Stabilize deploy flow",
+    url: "https://github.com/croft-eng/croft/pull/42",
+    author_login: "octocat",
+  };
+  const captured = {};
+  const pool = {
+    async query(sql, params) {
+      captured.sql = sql;
+      captured.params = params;
+      return {
+        rows: [row],
+      };
+    },
+  };
+
+  const result = await markPullRequestsDeployed(
+    pool,
+    [
+      { repo: "croft-eng/croft", pr_number: 42 },
+      { repo: "croft-eng/croft", prNumber: 42 },
+      { repo: "", pr_number: 43 },
+      { repo: "croft-eng/croft", pr_number: "not-a-number" },
+    ],
+    deployedAt,
+  );
+
+  assert.match(captured.sql, /UNNEST\(\$1::text\[\], \$2::integer\[\]\)/);
+  assert.match(captured.sql, /pull_requests.status IN \('tested', 'untested'\)/);
+  assert.match(captured.sql, /ORDER BY target_order ASC/);
+  assert.deepEqual(captured.params, [["croft-eng/croft"], [42], deployedAt]);
+  assert.deepEqual(result, {
+    deployedPullRequestCount: 1,
+    deployedPullRequests: [row],
+  });
+});
+
+test("markPullRequestsDeployed skips database call when no valid targets exist", async () => {
+  let queried = false;
+  const pool = {
+    async query() {
+      queried = true;
+      return { rows: [] };
+    },
+  };
+
+  const result = await markPullRequestsDeployed(pool, [{ repo: "", pr_number: 42 }], new Date());
+
+  assert.equal(queried, false);
+  assert.deepEqual(result, {
+    deployedPullRequestCount: 0,
+    deployedPullRequests: [],
   });
 });
 

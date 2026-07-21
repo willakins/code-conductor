@@ -68,14 +68,123 @@ async function sendDeploymentCompletionFollowUpIfNeeded({
   respond,
 }) {
   const shouldNotifyCompletion = Boolean(executionResult.shouldNotifyDeploymentCompletion);
+  const shouldFinalizeProductionDeployment = Boolean(
+    executionResult.shouldFinalizeProductionDeployment,
+  );
   const externalDeploymentId = executionResult.externalDeploymentId || null;
-  if (!shouldNotifyCompletion || !externalDeploymentId) {
+  if ((!shouldNotifyCompletion && !shouldFinalizeProductionDeployment) || !externalDeploymentId) {
+    return;
+  }
+
+  const completionWork = waitForDeploymentCompletionAndFinalize({
+    calypsoCommandService,
+    communicationClient,
+    executionResult,
+    externalDeploymentId,
+    userId,
+  });
+
+  if (!shouldNotifyCompletion) {
+    completionWork.catch((error) => {
+      console.error(`Failed to finalize deployment ${externalDeploymentId}.`);
+      console.error(error.message);
+    });
     return;
   }
 
   try {
-    const completionState = await calypsoCommandService.waitForProdDeploymentCompletion(
-      externalDeploymentId,
+    const { completionState, finalizationResult } = await completionWork;
+
+    await respond({
+      response_type: normalizeResponseType(
+        executionResult.followUpResponseType || executionResult.responseType,
+      ),
+      text: await buildDeploymentCompletionSuccessText({
+        calypsoCommandService,
+        communicationClient,
+        completionState,
+        executionResult,
+        externalDeploymentId,
+        finalizationResult,
+        userId,
+      }),
+    });
+  } catch (error) {
+    await respond({
+      response_type: normalizeResponseType(
+        executionResult.followUpResponseType || executionResult.responseType,
+      ),
+      text: buildDeploymentCompletionFailureText({
+        externalDeploymentId,
+        error,
+      }),
+    });
+  }
+}
+
+function buildDeploymentCompletionFailureText({ externalDeploymentId, error }) {
+  if (error?.code === "DEPLOY_STATE_ROLLED_BACK") {
+    return `${SLACK_HERE_MENTION} Deployment ${externalDeploymentId} finished, but Calypso could not commit deployment state: ${error.message} No deploy records or PR statuses were committed.`;
+  }
+
+  return `${SLACK_HERE_MENTION} Deployment ${externalDeploymentId} failed after trigger: ${error.message}. No deploy records or PR statuses were committed.`;
+}
+
+async function waitForDeploymentCompletionAndFinalize({
+  calypsoCommandService,
+  communicationClient,
+  executionResult,
+  externalDeploymentId,
+  userId,
+}) {
+  const commandContext = {
+    communicationClient,
+    deployConfig: executionResult.deployConfigOverrides || {},
+    deployProvider: executionResult.deployProvider,
+    userId,
+  };
+  const completionState = await calypsoCommandService.waitForProdDeploymentCompletion(
+    externalDeploymentId,
+    commandContext,
+  );
+  let finalizationResult = null;
+
+  if (executionResult.shouldFinalizeProductionDeployment) {
+    finalizationResult = await calypsoCommandService.finalizeProductionDeployment(
+      executionResult.productionDeploymentFinalization,
+      commandContext,
+    );
+  }
+
+  return {
+    completionState,
+    finalizationResult,
+  };
+}
+
+async function buildDeploymentCompletionSuccessText({
+  calypsoCommandService,
+  communicationClient,
+  completionState,
+  executionResult,
+  externalDeploymentId,
+  finalizationResult,
+  userId,
+}) {
+  const completionPhase = completionState?.phase || completionState?.status || "unknown";
+  const baseText = `Deployment ${externalDeploymentId} finished successfully with phase ${completionPhase}.`;
+  if (!finalizationResult) {
+    return baseText;
+  }
+
+  const deployedPullRequestSummaryText =
+    await calypsoCommandService.buildDeploymentPullRequestSummary(
+      {
+        heading: "Deployed PRs:",
+        pullRequestCount: finalizationResult.deployedPullRequestCount,
+        pullRequests: finalizationResult.deployedPullRequests,
+        detailsUnavailableText: "PR(s) deployed (details unavailable).",
+      },
       {
         communicationClient,
         deployConfig: executionResult.deployConfigOverrides || {},
@@ -84,20 +193,10 @@ async function sendDeploymentCompletionFollowUpIfNeeded({
       },
     );
 
-    await respond({
-      response_type: normalizeResponseType(
-        executionResult.followUpResponseType || executionResult.responseType,
-      ),
-      text: `Deployment ${externalDeploymentId} finished successfully with phase ${completionState.phase}.`,
-    });
-  } catch (error) {
-    await respond({
-      response_type: normalizeResponseType(
-        executionResult.followUpResponseType || executionResult.responseType,
-      ),
-      text: `${SLACK_HERE_MENTION} Deployment ${externalDeploymentId} failed after trigger: ${error.message}`,
-    });
-  }
+  return [
+    `${baseText} Marked ${finalizationResult.deployedPullRequestCount} PR(s) deployed.`,
+    deployedPullRequestSummaryText,
+  ].join("\n");
 }
 
 function normalizeResponseType(responseType) {

@@ -248,6 +248,39 @@ async function listBlockingPullRequests(pool, lastDeployAt) {
   return result.rows;
 }
 
+async function listDeployablePullRequestsForDeployment(
+  pool,
+  lastDeployAt,
+  deploymentCutoffAt,
+  options = {},
+) {
+  const deployableStatuses = options.includeUntested
+    ? ["tested", "untested"]
+    : ["tested"];
+  const query = `
+    SELECT
+      repo,
+      pr_number,
+      title,
+      url,
+      status,
+      merged_at,
+      (
+        SELECT author_login
+        FROM open_pr_review_state
+        WHERE open_pr_review_state.repo = pull_requests.repo
+          AND open_pr_review_state.pr_number = pull_requests.pr_number
+      ) AS author_login
+    FROM pull_requests
+    WHERE merged_at > $1
+      AND merged_at <= $2
+      AND status = ANY($3::text[])
+    ORDER BY merged_at ASC, pr_number ASC
+  `;
+  const result = await pool.query(query, [lastDeployAt, deploymentCutoffAt, deployableStatuses]);
+  return result.rows;
+}
+
 async function upsertPullRequestAsUntested(pool, pullRequest) {
   const query = `
     INSERT INTO pull_requests (
@@ -417,13 +450,14 @@ async function findMostRecentPullRequestByNumber(pool, prNumber) {
 async function insertDeployment(pool, deployment) {
   const query = `
     INSERT INTO deployments (environment, provider, external_deploy_id, deployed_at)
-    VALUES ($1, $2, $3, NOW())
+    VALUES ($1, $2, $3, COALESCE($4, NOW()))
     RETURNING id, environment, provider, external_deploy_id, deployed_at
   `;
   const queryValues = [
     deployment.environment,
     deployment.provider,
     deployment.externalDeployId || null,
+    deployment.deployedAt || null,
   ];
   const result = await pool.query(query, queryValues);
   return result.rows[0];
@@ -452,6 +486,58 @@ async function markPullRequestsDeployedSince(pool, lastDeployAt, deployedAt) {
   const result = await pool.query(query, [lastDeployAt, deployedAt]);
   return {
     deployedPullRequestCount: result.rowCount,
+    deployedPullRequests: result.rows,
+  };
+}
+
+async function markPullRequestsDeployed(pool, pullRequests, deployedAt) {
+  const deploymentTargets = normalizeDeploymentPullRequestTargets(pullRequests);
+  if (deploymentTargets.length === 0) {
+    return {
+      deployedPullRequestCount: 0,
+      deployedPullRequests: [],
+    };
+  }
+
+  const query = `
+    WITH targets AS (
+      SELECT *
+      FROM UNNEST($1::text[], $2::integer[]) WITH ORDINALITY AS target(repo, pr_number, target_order)
+    ),
+    updated AS (
+      UPDATE pull_requests
+      SET status = 'deployed',
+          deployed_at = $3,
+          updated_at = NOW()
+      FROM targets
+      WHERE pull_requests.repo = targets.repo
+        AND pull_requests.pr_number = targets.pr_number
+        AND pull_requests.status IN ('tested', 'untested')
+      RETURNING
+        pull_requests.repo,
+        pull_requests.pr_number,
+        pull_requests.title,
+        pull_requests.url,
+        (
+          SELECT author_login
+          FROM open_pr_review_state
+          WHERE open_pr_review_state.repo = pull_requests.repo
+            AND open_pr_review_state.pr_number = pull_requests.pr_number
+        ) AS author_login,
+        targets.target_order
+    )
+    SELECT repo, pr_number, title, url, author_login
+    FROM updated
+    ORDER BY target_order ASC
+  `;
+  const result = await pool.query(query, [
+    deploymentTargets.map((target) => target.repo),
+    deploymentTargets.map((target) => target.prNumber),
+    deployedAt,
+  ]);
+
+  return {
+    deployedPullRequestCount: result.rows.length,
     deployedPullRequests: result.rows,
   };
 }
@@ -2892,6 +2978,27 @@ function normalizeNullableInteger(value) {
   return normalizeInteger(value);
 }
 
+function normalizeDeploymentPullRequestTargets(pullRequests) {
+  const seenTargets = new Set();
+  const normalizedTargets = [];
+
+  for (const pullRequest of Array.isArray(pullRequests) ? pullRequests : []) {
+    const repo = String(pullRequest?.repo || "").trim();
+    const prNumber = normalizePositiveInteger(
+      pullRequest?.pr_number ?? pullRequest?.prNumber,
+    );
+    const targetKey = `${repo}#${prNumber}`;
+    if (!repo || !prNumber || seenTargets.has(targetKey)) {
+      continue;
+    }
+
+    seenTargets.add(targetKey);
+    normalizedTargets.push({ repo, prNumber });
+  }
+
+  return normalizedTargets;
+}
+
 function normalizeNonNegativeInteger(value) {
   const parsedValue = normalizeInteger(value);
   return parsedValue !== null && parsedValue >= 0 ? parsedValue : null;
@@ -3265,6 +3372,7 @@ module.exports = {
   insertDeployment,
   insertSupportEmailThread,
   listGithubSlackUserMappings,
+  listDeployablePullRequestsForDeployment,
   listOpenErrorTrackingIssues,
   listOpenPullRequestsForReviewRecapSince,
   listPendingSupportEmailThreads,
@@ -3278,6 +3386,7 @@ module.exports = {
   markStaleOpenPullRequestsClosed,
   markAllUntestedPullRequestsTested,
   markEnvironmentStatusNotificationSent,
+  markPullRequestsDeployed,
   markReviewRecapSent,
   markPullRequestsDeployedSince,
   markSupportEmailThreadNotificationSent,

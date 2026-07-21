@@ -15,6 +15,7 @@ const {
   getSupportEmailConfig,
   isUserWhitelistedForDeploy,
   insertDeployment,
+  listDeployablePullRequestsForDeployment,
   listGithubSlackUserMappings,
   listPendingSupportEmailThreads,
   listOpenErrorTrackingIssues,
@@ -25,7 +26,7 @@ const {
   markReviewRecapSent,
   markAllUntestedPullRequestsTested,
   markPullRequestTested,
-  markPullRequestsDeployedSince,
+  markPullRequestsDeployed,
   markSupportEmailThreadNotificationSent,
   markSupportEmailThreadResponded,
   recordEnvironmentStatusObservation,
@@ -61,6 +62,9 @@ const {
 const { DEFAULT_BOT_NAME } = require("../../config");
 const { formatStatusResponse, isValidTimeZone } = require("../../util/format");
 const { createCalypsoCommandRegistry } = require("../registry/command_registry");
+const {
+  buildDeploymentPullRequestSummary: formatDeploymentPullRequestSummary,
+} = require("../types/deploy_command");
 
 function createCalypsoCommandService(serviceOptions = {}) {
   const commandRegistry = createCalypsoCommandRegistry({
@@ -90,6 +94,29 @@ function createCalypsoCommandService(serviceOptions = {}) {
         runtimeContext.deployConfig,
         externalDeployId,
       );
+    },
+
+    async finalizeProductionDeployment(deploymentFinalization, commandContext = {}) {
+      const runtimeContext = buildRuntimeContext({
+        serviceOptions,
+        commandContext,
+        defaultDependencies,
+      });
+
+      return finalizeProductionDeployment(runtimeContext, deploymentFinalization);
+    },
+
+    async buildDeploymentPullRequestSummary(summaryOptions, commandContext = {}) {
+      const runtimeContext = buildRuntimeContext({
+        serviceOptions,
+        commandContext,
+        defaultDependencies,
+      });
+
+      return formatDeploymentPullRequestSummary({
+        runtime: runtimeContext,
+        ...summaryOptions,
+      });
     },
 
     async resolveDeployAccess(commandContext = {}) {
@@ -125,6 +152,7 @@ function createDefaultDependencies() {
     getSupportEmailConfigFn: getSupportEmailConfig,
     getSupportEmailThreadByIdFn: getSupportEmailThreadById,
     listPendingSupportEmailThreadsFn: listPendingSupportEmailThreads,
+    listDeployablePullRequestsForDeploymentFn: listDeployablePullRequestsForDeployment,
     listOpenErrorTrackingIssuesFn: listOpenErrorTrackingIssues,
     listOpenPullRequestsWaitingOnReviewSinceFn: listOpenPullRequestsWaitingOnReviewSince,
     listGithubSlackUserMappingsFn: listGithubSlackUserMappings,
@@ -134,7 +162,7 @@ function createDefaultDependencies() {
     markAllUntestedPullRequestsTestedFn: markAllUntestedPullRequestsTested,
     markEnvironmentStatusNotificationSentFn: markEnvironmentStatusNotificationSent,
     markPullRequestTestedFn: markPullRequestTested,
-    markPullRequestsDeployedSinceFn: markPullRequestsDeployedSince,
+    markPullRequestsDeployedFn: markPullRequestsDeployed,
     markSupportEmailThreadNotificationSentFn: markSupportEmailThreadNotificationSent,
     markSupportEmailThreadRespondedFn: markSupportEmailThreadResponded,
     recordEnvironmentStatusObservationFn: recordEnvironmentStatusObservation,
@@ -251,6 +279,9 @@ function buildRuntimeContext({ serviceOptions, commandContext, defaultDependenci
       defaultDependencies.listGithubSlackUserMappingsFn,
     listBlockingPullRequestsFn:
       mergedOptions.listBlockingPullRequestsFn || defaultDependencies.listBlockingPullRequestsFn,
+    listDeployablePullRequestsForDeploymentFn:
+      mergedOptions.listDeployablePullRequestsForDeploymentFn ||
+      defaultDependencies.listDeployablePullRequestsForDeploymentFn,
     markAllUntestedPullRequestsTestedFn:
       mergedOptions.markAllUntestedPullRequestsTestedFn ||
       defaultDependencies.markAllUntestedPullRequestsTestedFn,
@@ -261,9 +292,9 @@ function buildRuntimeContext({ serviceOptions, commandContext, defaultDependenci
       mergedOptions.markReviewRecapSentFn || defaultDependencies.markReviewRecapSentFn,
     markPullRequestTestedFn:
       mergedOptions.markPullRequestTestedFn || defaultDependencies.markPullRequestTestedFn,
-    markPullRequestsDeployedSinceFn:
-      mergedOptions.markPullRequestsDeployedSinceFn ||
-      defaultDependencies.markPullRequestsDeployedSinceFn,
+    markPullRequestsDeployedFn:
+      mergedOptions.markPullRequestsDeployedFn ||
+      defaultDependencies.markPullRequestsDeployedFn,
     markSupportEmailThreadNotificationSentFn:
       mergedOptions.markSupportEmailThreadNotificationSentFn ||
       defaultDependencies.markSupportEmailThreadNotificationSentFn,
@@ -408,6 +439,127 @@ async function triggerProductionDeploymentUnavailable() {
 
 async function waitForProductionDeploymentCompletionUnavailable() {
   throw new Error("Deploy provider is not configured.");
+}
+
+async function finalizeProductionDeployment(runtimeContext, deploymentFinalization = {}) {
+  if (!runtimeContext.pool) {
+    throw new Error("Deployment finalization unavailable: database pool is not configured.");
+  }
+
+  const externalDeploymentId = String(deploymentFinalization.externalDeploymentId || "").trim();
+  if (externalDeploymentId === "") {
+    throw new Error("Deployment finalization unavailable: missing external deployment id.");
+  }
+
+  const provider =
+    deploymentFinalization.deployProvider ||
+    deploymentFinalization.provider ||
+    runtimeContext.deployConfig.deployProvider ||
+    "digitalocean";
+  const deploymentCutoffAt = deploymentFinalization.deploymentCutoffAt || null;
+  const plannedPullRequests = Array.isArray(deploymentFinalization.plannedPullRequests)
+    ? deploymentFinalization.plannedPullRequests
+    : [];
+
+  return withDatabaseTransaction(runtimeContext.pool, async (transactionClient) => {
+    const deploymentRecord = await runtimeContext.insertDeploymentFn(transactionClient, {
+      environment: "prod",
+      provider,
+      externalDeployId: externalDeploymentId,
+      deployedAt: deploymentCutoffAt,
+    });
+    const deployedAt = deploymentRecord?.deployed_at || deploymentCutoffAt;
+    const deployedPullRequestMarkingResult = await runtimeContext.markPullRequestsDeployedFn(
+      transactionClient,
+      plannedPullRequests,
+      deployedAt,
+    );
+    const normalizedDeployedPullRequestMarkingResult =
+      normalizeDeployedPullRequestMarkingResult(deployedPullRequestMarkingResult);
+
+    return {
+      deploymentRecord,
+      deployedPullRequestCount:
+        normalizedDeployedPullRequestMarkingResult.deployedPullRequestCount,
+      deployedPullRequests:
+        normalizedDeployedPullRequestMarkingResult.deployedPullRequests,
+      externalDeploymentId,
+    };
+  });
+}
+
+async function withDatabaseTransaction(pool, transactionalWork) {
+  let transactionStarted = false;
+  const transactionClient =
+    typeof pool.connect === "function" ? await pool.connect() : pool;
+
+  try {
+    await transactionClient.query("BEGIN");
+    transactionStarted = true;
+
+    const result = await transactionalWork(transactionClient);
+
+    await transactionClient.query("COMMIT");
+    transactionStarted = false;
+    return result;
+  } catch (error) {
+    if (transactionStarted) {
+      await transactionClient.query("ROLLBACK");
+      throw buildRolledBackDeploymentError(error);
+    }
+    throw error;
+  } finally {
+    if (transactionClient !== pool && typeof transactionClient.release === "function") {
+      transactionClient.release();
+    }
+  }
+}
+
+function buildRolledBackDeploymentError(cause) {
+  const rolledBackError = new Error("Deployment state transaction rolled back.", { cause });
+  rolledBackError.code = "DEPLOY_STATE_ROLLED_BACK";
+  return rolledBackError;
+}
+
+function normalizeDeployedPullRequestMarkingResult(markingResult) {
+  if (typeof markingResult === "number" && Number.isFinite(markingResult)) {
+    return {
+      deployedPullRequestCount: markingResult,
+      deployedPullRequests: [],
+    };
+  }
+
+  if (!markingResult || typeof markingResult !== "object") {
+    return {
+      deployedPullRequestCount: 0,
+      deployedPullRequests: [],
+    };
+  }
+
+  const deployedPullRequests = normalizeDeployedPullRequests(
+    markingResult.deployedPullRequests || markingResult.pullRequests,
+  );
+  const parsedCount = Number(markingResult.deployedPullRequestCount);
+  const deployedPullRequestCount = Number.isFinite(parsedCount)
+    ? parsedCount
+    : deployedPullRequests.length;
+
+  return {
+    deployedPullRequestCount,
+    deployedPullRequests,
+  };
+}
+
+function normalizeDeployedPullRequests(deployedPullRequests) {
+  return (Array.isArray(deployedPullRequests) ? deployedPullRequests : [])
+    .map((pullRequest) => ({
+      repo: String(pullRequest?.repo || "").trim(),
+      pr_number: pullRequest?.pr_number,
+      title: String(pullRequest?.title || "").trim() || null,
+      url: String(pullRequest?.url || "").trim() || null,
+      author_login: String(pullRequest?.author_login || "").trim() || null,
+    }))
+    .filter((pullRequest) => Boolean(pullRequest.repo) && pullRequest.pr_number !== undefined);
 }
 
 async function resolveDeployAccess(runtimeContext) {

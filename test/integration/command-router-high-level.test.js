@@ -6,6 +6,7 @@ const { registerCalypsoCommand } = require("../../src/commands/command_router");
 test("high-level command lifecycle: status -> tested -> deploy -> status", async () => {
   const state = createInMemoryState();
   const { app, commandHandler } = createCommandHandler({
+    enableDeploymentCompletionNotifications: true,
     pool: createPoolTransactionRecorder(state),
     resolveDeployAccessFn: async () => ({ canDeploy: true }),
     deployConfig: {
@@ -18,6 +19,15 @@ test("high-level command lifecycle: status -> tested -> deploy -> status", async
         (pr) =>
           pr.merged_at > lastDeployAt && pr.status !== "tested" && pr.status !== "deployed",
       ),
+    listDeployablePullRequestsForDeploymentFn: async (_pool, lastDeployAt, deploymentCutoffAt) =>
+      state.pullRequests
+        .filter(
+          (pr) =>
+            pr.merged_at > lastDeployAt &&
+            pr.merged_at <= deploymentCutoffAt &&
+            pr.status === "tested",
+        )
+        .map(mapPullRequestForDeployment),
     markPullRequestTestedFn: async (_pool, prNumber, testedBy) => {
       const pullRequest = state.pullRequests.find((pr) => pr.pr_number === prNumber);
       if (!pullRequest) {
@@ -32,29 +42,29 @@ test("high-level command lifecycle: status -> tested -> deploy -> status", async
       return { found: true, alreadyTested: false, pullRequest };
     },
     triggerProdDeployFn: async () => ({ externalDeployId: "dep-999" }),
-    insertDeploymentFn: async () => {
+    waitForProdDeployCompletionFn: async () => ({ id: "dep-999", phase: "ACTIVE" }),
+    insertDeploymentFn: async (_pool, deployment) => {
       const deploymentRecord = {
-        deployed_at: new Date("2026-02-13T19:00:00.000Z"),
+        deployed_at: deployment.deployedAt,
       };
       state.lastProductionDeploymentAt = deploymentRecord.deployed_at;
       state.deployments.push(deploymentRecord);
       return deploymentRecord;
     },
     listGithubSlackUserMappingsFn: async () => new Map([["octocat", "U123ABC"]]),
-    markPullRequestsDeployedSinceFn: async (_pool, lastDeployAt, deployedAt) => {
+    markPullRequestsDeployedFn: async (_pool, plannedPullRequests, deployedAt) => {
       const deployedPullRequests = [];
 
-      for (const pullRequest of state.pullRequests) {
-        if (pullRequest.merged_at > lastDeployAt && pullRequest.status === "tested") {
+      for (const plannedPullRequest of plannedPullRequests) {
+        const pullRequest = state.pullRequests.find(
+          (candidate) =>
+            candidate.repo === plannedPullRequest.repo &&
+            candidate.pr_number === plannedPullRequest.pr_number,
+        );
+        if (pullRequest && (pullRequest.status === "tested" || pullRequest.status === "untested")) {
           pullRequest.status = "deployed";
           pullRequest.deployed_at = deployedAt;
-          deployedPullRequests.push({
-            repo: pullRequest.repo,
-            pr_number: pullRequest.pr_number,
-            title: pullRequest.title || null,
-            url: pullRequest.url || null,
-            author_login: pullRequest.author_login || "unknown",
-          });
+          deployedPullRequests.push(mapPullRequestForDeployment(pullRequest));
         }
       }
 
@@ -70,7 +80,9 @@ test("high-level command lifecycle: status -> tested -> deploy -> status", async
   const statusBefore = await runSlashCommand(commandHandler, "status", "U_TESTER");
   const deployBlocked = await runSlashCommand(commandHandler, "deploy prod", "U_TESTER");
   const markTested = await runSlashCommand(commandHandler, "tested 700", "U_TESTER");
-  const deploySuccess = await runSlashCommand(commandHandler, "deploy prod", "U_TESTER");
+  const deployResponses = await runSlashCommandResponses(commandHandler, "deploy prod", "U_TESTER");
+  const deployStarted = deployResponses[0];
+  const deploySuccess = deployResponses[1];
   const statusAfter = await runSlashCommand(commandHandler, "status", "U_TESTER");
 
   assert.match(statusBefore.text, /Blocking PRs since last prod deploy/);
@@ -81,9 +93,13 @@ test("high-level command lifecycle: status -> tested -> deploy -> status", async
 
   assert.match(deployBlocked.text, /Deploy blocked due to untested PRs/);
   assert.match(markTested.text, /Marked PR #700 as tested/);
+  assert.equal(deployStarted.response_type, "in_channel");
+  assert.match(deployStarted.text, /Deploy to prod is in progress \(id: dep-999\)/);
+  assert.match(deployStarted.text, /Triggered by <@U_TESTER>/);
+  assert.match(deployStarted.text, /PRs to deploy:/);
+  assert.doesNotMatch(deployStarted.text, /Marked 1 PR\(s\) deployed/);
   assert.equal(deploySuccess.response_type, "in_channel");
-  assert.match(deploySuccess.text, /Deploy to prod is in progress \(id: dep-999\)/);
-  assert.match(deploySuccess.text, /Triggered by <@U_TESTER>/);
+  assert.match(deploySuccess.text, /Deployment dep-999 finished successfully with phase ACTIVE/);
   assert.match(deploySuccess.text, /Marked 1 PR\(s\) deployed/);
   assert.match(deploySuccess.text, /Deployed PRs:/);
   assert.match(
@@ -97,6 +113,16 @@ test("high-level command lifecycle: status -> tested -> deploy -> status", async
   assert.equal(state.pullRequests[0].status, "deployed");
   assert.equal(state.pullRequests[0].tested_by, "U_TESTER");
 });
+
+function mapPullRequestForDeployment(pullRequest) {
+  return {
+    repo: pullRequest.repo,
+    pr_number: pullRequest.pr_number,
+    title: pullRequest.title || null,
+    url: pullRequest.url || null,
+    author_login: pullRequest.author_login || "unknown",
+  };
+}
 
 function createInMemoryState() {
   return {
@@ -147,8 +173,12 @@ function createCommandHandler(serviceOptions) {
 }
 
 async function runSlashCommand(commandHandler, text, userId) {
-  let response;
+  const responses = await runSlashCommandResponses(commandHandler, text, userId);
+  return responses[responses.length - 1];
+}
 
+async function runSlashCommandResponses(commandHandler, text, userId) {
+  const responses = [];
   await commandHandler({
     command: {
       text,
@@ -156,9 +186,9 @@ async function runSlashCommand(commandHandler, text, userId) {
     },
     ack: async () => {},
     respond: async (message) => {
-      response = message;
+      responses.push(message);
     },
   });
 
-  return response;
+  return responses;
 }
