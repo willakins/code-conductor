@@ -993,6 +993,8 @@ Rules:
 `/calypso history [prod|staging]`
 
 - Shows the 20 most recent gate, testing, and deployment lifecycle events.
+- Renders each event as a separate card, using Slack mentions for Slack actors and a distinct metadata
+  row for deployment details.
 
 `/calypso doctor`
 

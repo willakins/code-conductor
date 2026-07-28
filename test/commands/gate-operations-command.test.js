@@ -57,18 +57,47 @@ test("gate close persists an audited reason and announces the transition", async
 
 test("history renders audited gate and deployment events", async () => {
   const handler = buildRegisteredHandler({
+    communicationProvider: "slack",
     pool: {},
-    listAuditEventsFn: async () => [{
-      actor_user_id: "UADMIN",
-      created_at: "2026-07-28T12:00:00.000Z",
-      summary: "Production gate closed.",
-    }],
+    listAuditEventsFn: async () => [
+      {
+        actor_user_id: "U092UMU4T4Z",
+        created_at: "2026-07-28T20:33:00.000Z",
+        metadata: {
+          deployedPullRequestCount: 4,
+          externalDeploymentId: "9fc5cf12-b518-40a2-900b-e46edd19f5b8",
+          runId: 1,
+        },
+        summary: "Production deployment run #1 succeeded.",
+      },
+      {
+        actor_user_id: "U092UMU4T4Z",
+        created_at: "2026-07-28T20:24:00.000Z",
+        summary: "Production deployment run #1 triggered.",
+      },
+      {
+        actor_user_id: "U092UMU4T4Z",
+        created_at: "2026-07-28T20:24:00.000Z",
+        summary: "Production deployment run #1 reserved.",
+      },
+    ],
   });
 
   const payload = await runCommand(handler, "history prod");
+  const eventBlocks = payload.blocks.filter(
+    (block) =>
+      block.type === "section"
+      && block.text?.text.includes("Production deployment run #1"),
+  );
 
-  assert.match(payload.text, /Production gate closed/);
-  assert.match(JSON.stringify(payload.blocks), /Latest events/);
+  assert.equal(eventBlocks.length, 3);
+  assert.match(eventBlocks[0].text.text, /by <@U092UMU4T4Z>/);
+  assert.doesNotMatch(eventBlocks[0].text.text, /by U092UMU4T4Z/);
+  assert.doesNotMatch(eventBlocks[0].text.text, /triggered/);
+  assert.match(
+    eventBlocks[0].text.text,
+    /by <@U092UMU4T4Z> · .+\ndeployment 9fc5cf12-b518-40a2-900b-e46edd19f5b8 · run #1 · 4 PR\(s\)/,
+  );
 });
 
 test("gate status reports the actual channel-topic fallback", async () => {
