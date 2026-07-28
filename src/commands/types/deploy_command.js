@@ -246,10 +246,17 @@ class DeployCommand extends BaseCalypsoCommand {
       const shouldNotifyDeploymentCompletion =
         runtime.enableDeploymentCompletionNotifications &&
         Boolean(externalDeploymentId);
+      const slackUsernameByGithubUsername = isProductionDeploy
+        ? await resolveSlackUsernameMappingsForPullRequests({
+            runtime,
+            pullRequests: productionDeploymentPlan.plannedPullRequests,
+          })
+        : new Map();
       const plannedPullRequestSummaryText = isProductionDeploy
         ? await this.buildPlannedPullRequestSummary({
             runtime,
             plannedPullRequests: productionDeploymentPlan.plannedPullRequests,
+            slackUsernameByGithubUsername,
           })
         : "";
       const missingDeploymentIdText =
@@ -305,6 +312,7 @@ class DeployCommand extends BaseCalypsoCommand {
             deploymentTriggeredBy,
             missingDeploymentIdText,
             plannedPullRequests: productionDeploymentPlan.plannedPullRequests,
+            slackUsernameByGithubUsername,
             shouldNotifyDeploymentCompletion,
           }),
         }),
@@ -589,13 +597,18 @@ class DeployCommand extends BaseCalypsoCommand {
     return `${baseText}\n${normalizedSummaryText}`;
   }
 
-  async buildPlannedPullRequestSummary({ runtime, plannedPullRequests }) {
+  async buildPlannedPullRequestSummary({
+    runtime,
+    plannedPullRequests,
+    slackUsernameByGithubUsername,
+  }) {
     return buildDeploymentPullRequestSummary({
       runtime,
       heading: "PRs to deploy:",
       pullRequestCount: plannedPullRequests.length,
       pullRequests: plannedPullRequests,
       detailsUnavailableText: "PR(s) planned for deployment (details unavailable).",
+      slackUsernameByGithubUsername,
     });
   }
 
@@ -711,6 +724,7 @@ function buildDeploymentStartedPresentation({
   deploymentTriggeredBy,
   missingDeploymentIdText,
   plannedPullRequests,
+  slackUsernameByGithubUsername,
   shouldNotifyDeploymentCompletion,
 }) {
   const environmentLabel = formatEnvironmentLabel(deployEnvironment);
@@ -725,9 +739,16 @@ function buildDeploymentStartedPresentation({
         title: String(pullRequest?.title || "").trim()
           || `${pullRequest?.repo}#${pullRequest?.pr_number}`,
         url: pullRequest?.url || "",
-        description: `${pullRequest?.repo}#${pullRequest?.pr_number} · ${
+        description: `by ${formatDeployedPullRequestAuthor({
+          pullRequest,
+          slackUsernameByGithubUsername:
+            slackUsernameByGithubUsername instanceof Map
+              ? slackUsernameByGithubUsername
+              : new Map(),
+        })} · ${pullRequest?.repo}#${pullRequest?.pr_number} · ${
           pullRequest?.tested ? "Tested" : "Included"
         }`,
+        inlineDescription: true,
       })),
     });
   }
@@ -849,6 +870,7 @@ async function buildDeploymentPullRequestSummary({
   pullRequestCount,
   pullRequests,
   detailsUnavailableText,
+  slackUsernameByGithubUsername,
 }) {
   const normalizedDeployedPullRequests = normalizeDeployedPullRequests(pullRequests);
   if (normalizedDeployedPullRequests.length === 0) {
@@ -859,25 +881,35 @@ async function buildDeploymentPullRequestSummary({
     return `${heading}\n• none.`;
   }
 
-  const githubUsernames = [...new Set(
-    normalizedDeployedPullRequests
-      .map((pullRequest) => normalizeGithubUsername(pullRequest.author_login))
-      .filter(Boolean),
-  )];
-  const slackUsernameByGithubUsername = await resolveSlackUsernameByGithubUsername({
-    runtime,
-    githubUsernames,
-  });
+  const resolvedSlackUsernameByGithubUsername =
+    slackUsernameByGithubUsername instanceof Map
+      ? slackUsernameByGithubUsername
+      : await resolveSlackUsernameMappingsForPullRequests({
+          runtime,
+          pullRequests: normalizedDeployedPullRequests,
+        });
 
   return [
     heading,
     ...normalizedDeployedPullRequests.map((pullRequest) =>
       formatDeployedPullRequestLine({
         pullRequest,
-        slackUsernameByGithubUsername,
+        slackUsernameByGithubUsername: resolvedSlackUsernameByGithubUsername,
       }),
     ),
   ].join("\n");
+}
+
+async function resolveSlackUsernameMappingsForPullRequests({ runtime, pullRequests }) {
+  const githubUsernames = [...new Set(
+    normalizeDeployedPullRequests(pullRequests)
+      .map((pullRequest) => normalizeGithubUsername(pullRequest.author_login))
+      .filter(Boolean),
+  )];
+  return resolveSlackUsernameByGithubUsername({
+    runtime,
+    githubUsernames,
+  });
 }
 
 async function resolveSlackUsernameByGithubUsername({ runtime, githubUsernames }) {

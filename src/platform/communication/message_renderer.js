@@ -268,6 +268,9 @@ function formatSlackItem(item) {
   const title = item.url
     ? `<${sanitizeSlackUrl(item.url)}|${sanitizeSlackLinkLabel(item.title)}>`
     : item.title;
+  if (item.inlineDescription && item.description) {
+    return `• ${title} ${item.description}`;
+  }
   return [`• ${title}`, item.description ? `  ${item.description}` : ""]
     .filter(Boolean)
     .join("\n");
@@ -277,6 +280,9 @@ function formatTeamsItem(item) {
   const title = item.url
     ? `[${escapeTeamsLinkLabel(item.title)}](${item.url})`
     : item.title;
+  if (item.inlineDescription && item.description) {
+    return `• ${title} ${convertSlackMarkupToTeams(item.description)}`;
+  }
   return [`• ${title}`, item.description ? `  ${convertSlackMarkupToTeams(item.description)}` : ""]
     .filter(Boolean)
     .join("\n");
@@ -330,6 +336,7 @@ function normalizePresentationItems(items) {
       title: normalizeText(item?.title),
       url: normalizeText(item?.url),
       description: normalizeText(item?.description),
+      inlineDescription: item?.inlineDescription === true,
     }))
     .filter((item) => item.title);
   const omittedItemCount = normalizedItems.length - MAX_ITEMS_PER_PRESENTATION_SECTION;

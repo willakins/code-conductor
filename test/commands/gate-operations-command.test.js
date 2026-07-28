@@ -248,6 +248,48 @@ test("Slack action values execute through the same command router", async () => 
   assert.match(payload.blocks[0].text.text, /Calypso help/);
 });
 
+test("confirmed production deploy posts its announcement publicly to the Slack channel", async () => {
+  let actionHandler;
+  const actionResponses = [];
+  registerCalypsoCommand({
+    action(_pattern, handler) {
+      actionHandler = handler;
+    },
+    command() {},
+  }, {
+    communicationProvider: "slack",
+    consumeDeploymentConfirmationFn: async (_pool, confirmation) => confirmation,
+    deployConfig: { digitaloceanToken: "token", doAppIdProd: "prod-app" },
+    enableGateControl: true,
+    getActiveDeploymentRunFn: async () => null,
+    getDeploymentGateStateFn: async () => ({ status: "open" }),
+    getLastProdDeployAtFn: async () => new Date(0),
+    insertAuditEventFn: async () => {},
+    listBlockingPullRequestsFn: async () => [],
+    listDeployablePullRequestsForDeploymentFn: async () => [],
+    markDeploymentRunTriggeredFn: async () => {},
+    pool: {},
+    reserveDeploymentRunFn: async () => ({ acquired: true, run: { id: 12 } }),
+    resolveDeployAccessFn: async () => ({ canDeploy: true }),
+    triggerProdDeployFn: async () => ({ externalDeployId: null }),
+  });
+
+  await actionHandler({
+    ack: async () => {},
+    action: { value: "deploy prod confirm confirm-token" },
+    body: { channel: { id: "C_DEPLOYS" }, user: { id: "UADMIN" } },
+    client: {},
+    respond: async (response) => {
+      actionResponses.push(response);
+    },
+  });
+
+  assert.equal(actionResponses.length, 1);
+  assert.equal(actionResponses[0].response_type, "in_channel");
+  assert.equal(actionResponses[0].replace_original, false);
+  assert.match(actionResponses[0].blocks[0].text.text, /Production deployment started/);
+});
+
 test("production deploy requires a user-bound server-side confirmation", async () => {
   let triggerCount = 0;
   const handler = buildRegisteredHandler({

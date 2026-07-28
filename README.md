@@ -1076,8 +1076,11 @@ Rules:
 - If no operational or `must-test` blockers exist and DigitalOcean env vars are missing, returns
   "deploy not configured".
 - If configured and deploy is initiated:
+  - publishes the confirmed Slack deployment as a new in-channel announcement rather than updating
+    the requester's ephemeral confirmation
   - shows the triggering Slack user as a Slack mention
-  - includes a `PRs to deploy` list with PR title links and mapped author handles
+  - includes each PR on one compact line with its title link, mapped author handle, repository/number,
+    and inclusion status
   - labels each PR that was tested with `(tested)`
   - does not insert a `deployments` row yet
   - does not mark PRs as `deployed` yet
