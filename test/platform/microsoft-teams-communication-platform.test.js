@@ -49,6 +49,11 @@ test("microsoft teams platform registers command route and responds", async () =
 
   assert.equal(response.statusCode, 200);
   assert.match(response.payload.text, /\/calypso help/);
+  assert.equal(response.payload.attachments.length, 1);
+  assert.match(
+    JSON.stringify(response.payload.attachments[0].content.body),
+    /Calypso help/,
+  );
   assert.equal(await platform.resolveUserDisplayName("U123"), "will.akins");
   assert.equal(await platform.isWorkspaceAdmin("UADMIN"), true);
   assert.equal(await platform.isWorkspaceAdmin("UNAUTHORIZED"), false);

@@ -4,6 +4,9 @@ const { DEFAULT_BOT_NAME } = require("../config");
 const {
   buildCommunicationMessage,
 } = require("../platform/communication/message_renderer");
+const {
+  buildDefaultCommandPresentation,
+} = require("./presentation/default_command_presentation");
 
 const SLACK_HERE_MENTION = "<!here>";
 
@@ -18,9 +21,10 @@ function registerCalypsoCommand(app, options = {}) {
 
   app.command("/calypso", async ({ client, command, ack, respond }) => {
     await ack();
+    let parsedCommand = null;
 
     try {
-      const parsedCommand = parseCalypsoCommand({
+      parsedCommand = parseCalypsoCommand({
         text: command.text,
         botName,
       });
@@ -34,6 +38,7 @@ function registerCalypsoCommand(app, options = {}) {
         currentChannelName: resolveCommandChannelName(command),
         sendInterimResponseFn: async ({ responseType, text, presentation }) => {
           await respond(buildCommandResponse({
+            commandName: parsedCommand.commandName,
             communicationProvider: options.communicationProvider,
             responseType,
             text,
@@ -43,6 +48,7 @@ function registerCalypsoCommand(app, options = {}) {
       });
 
       await respond(buildCommandResponse({
+        commandName: parsedCommand.commandName,
         communicationProvider: options.communicationProvider,
         responseType: executionResult.responseType,
         text: executionResult.responseText,
@@ -60,10 +66,13 @@ function registerCalypsoCommand(app, options = {}) {
     } catch (error) {
       console.error("Failed to process /calypso command.");
       console.error(error.message);
-      await respond({
-        response_type: "ephemeral",
-        text: `${botName} hit an error while processing that command.`,
-      });
+      const errorText = `${botName} hit an error while processing that command.`;
+      await respond(buildCommandResponse({
+        commandName: parsedCommand?.commandName || "unknown",
+        communicationProvider: options.communicationProvider,
+        responseType: "ephemeral",
+        text: errorText,
+      }));
     }
   });
 }
@@ -143,17 +152,25 @@ async function sendDeploymentCompletionFollowUpIfNeeded({
 }
 
 function buildCommandResponse({
+  commandName,
   communicationProvider,
   responseType,
   text,
   presentation,
 }) {
+  const resolvedPresentation =
+    presentation ||
+    buildDefaultCommandPresentation({
+      commandName,
+      responseText: text,
+    });
+
   return {
     response_type: normalizeResponseType(responseType),
     ...buildCommunicationMessage({
       provider: communicationProvider,
       text,
-      presentation,
+      presentation: resolvedPresentation,
     }),
   };
 }

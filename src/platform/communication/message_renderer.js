@@ -11,6 +11,10 @@ const TONE_STYLES = {
     icon: "🚀",
     teamsColor: "Accent",
   },
+  neutral: {
+    icon: "🌊",
+    teamsColor: "Default",
+  },
   success: {
     icon: "✅",
     teamsColor: "Good",
@@ -71,7 +75,9 @@ function buildSlackBlocks(presentation) {
   }
 
   for (const section of presentation.sections) {
-    blocks.push({ type: "divider" });
+    if (section.separator) {
+      blocks.push({ type: "divider" });
+    }
     const itemGroups = chunk(section.items, MAX_ITEMS_PER_SECTION);
     if (itemGroups.length === 0) {
       blocks.push(buildSlackSection(formatSlackSectionText(section, [])));
@@ -146,7 +152,7 @@ function buildTeamsAdaptiveCard(presentation) {
     const sectionItems = section.items.map(formatTeamsItem);
     body.push({
       type: "Container",
-      separator: true,
+      separator: section.separator,
       items: [
         section.title
           ? {
@@ -257,6 +263,7 @@ function normalizePresentation(presentation) {
       .map((section) => ({
         title: normalizeText(section?.title),
         text: normalizeText(section?.text),
+        separator: section?.separator !== false,
         items: normalizePresentationItems(section?.items),
       }))
       .filter((section) => section.title || section.text || section.items.length > 0),

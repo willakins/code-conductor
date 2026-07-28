@@ -1,5 +1,8 @@
 const { BaseCalypsoCommand } = require("./base_command");
 const { formatPullRequestReference } = require("../../util/format");
+const {
+  readDeployAvailabilityFromTopic,
+} = require("../../shared/deploy_availability");
 
 class DeployCommand extends BaseCalypsoCommand {
   constructor() {
@@ -741,45 +744,6 @@ function isSlackCommunicationProvider(provider) {
 
 function formatSlackUserMention(userId) {
   return `<@${userId}>`;
-}
-
-function readDeployAvailabilityFromTopic(topicText, deployEnvironment) {
-  const rawTopic = String(topicText || "");
-  const segment = readEnvironmentTopicSegment(rawTopic, deployEnvironment);
-  if (!segment) {
-    return "unknown";
-  }
-
-  const normalizedSegment = segment.toLowerCase();
-  const hasRedStatus = [":red_circle:", ":large_red_circle:", "🔴"].some((token) =>
-    normalizedSegment.includes(token.toLowerCase()),
-  );
-  if (hasRedStatus) {
-    return "blocked";
-  }
-
-  const hasGreenStatus = [":green_circle:", ":large_green_circle:", "🟢"].some((token) =>
-    normalizedSegment.includes(token.toLowerCase()),
-  );
-  if (hasGreenStatus) {
-    return "allowed";
-  }
-
-  return "unknown";
-}
-
-function readEnvironmentTopicSegment(topicText, deployEnvironment) {
-  const normalizedEnvironment = String(deployEnvironment || "").toLowerCase();
-  const targetLabel =
-    normalizedEnvironment === "prod" ? "(?:prod|production)" : "(?:staging)";
-  const otherLabel =
-    normalizedEnvironment === "prod" ? "(?:staging)" : "(?:prod|production)";
-  const pattern = new RegExp(
-    `\\b${targetLabel}\\b\\s*:\\s*(.*?)(?=\\b${otherLabel}\\b\\s*:|$)`,
-    "i",
-  );
-  const match = String(topicText || "").match(pattern);
-  return match?.[1] ? String(match[1]).trim() : "";
 }
 
 module.exports = {
