@@ -138,8 +138,10 @@ test("microsoft teams platform renders status as an adaptive card", async () => 
     "application/vnd.microsoft.card.adaptive",
   );
   const cardText = JSON.stringify(response.payload.attachments[0].content.body);
-  assert.match(cardText, /Production deploy is blocked/);
+  assert.match(cardText, /Production deploy is clear/);
+  assert.match(cardText, /will be included by force deploy/);
   assert.match(cardText, /\[acme\/widgets#42 — Improve deploy controls\]/);
+  assert.match(cardText, /Review deployment/);
 });
 
 test("microsoft teams platform returns 400 for missing command text", async () => {

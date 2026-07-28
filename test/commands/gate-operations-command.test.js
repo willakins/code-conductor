@@ -150,6 +150,80 @@ test("active deployment blocks a second deploy before provider trigger", async (
   assert.equal(triggered, false);
 });
 
+test("production deploy bypasses ordinary untested PRs", async () => {
+  let deploymentPlanOptions;
+  const handler = buildRegisteredHandler({
+    createDeploymentConfirmationFn: async () => ({
+      expires_at: "2026-07-28T18:10:00.000Z",
+      token: "confirm-token",
+    }),
+    deployConfig: { digitaloceanToken: "token", doAppIdProd: "prod-app" },
+    enableGateControl: true,
+    getActiveDeploymentRunFn: async () => null,
+    getDeploymentGateStateFn: async () => ({ status: "open" }),
+    getLastProdDeployAtFn: async () => new Date(0),
+    listBlockingPullRequestsFn: async () => [{
+      force_deploy_blocked: false,
+      pr_number: 3958,
+      repo: "croft-eng/croft",
+      status: "untested",
+    }],
+    listDeployablePullRequestsForDeploymentFn: async (
+      _pool,
+      _lastDeployAt,
+      _deploymentCutoffAt,
+      options,
+    ) => {
+      deploymentPlanOptions = options;
+      return [];
+    },
+    pool: {},
+    resolveDeployAccessFn: async () => ({ canDeploy: true }),
+  });
+
+  const payload = await runCommand(handler, "deploy prod");
+
+  assert.match(payload.text, /ready for confirmation/);
+  assert.match(JSON.stringify(payload.blocks), /deploy prod confirm confirm-token/);
+  assert.doesNotMatch(payload.text, /Deploy blocked due to untested PRs/);
+  assert.deepEqual(deploymentPlanOptions, { includeUntested: true });
+});
+
+test("production deploy rechecks must-test state from the deployment plan", async () => {
+  let confirmationCreated = false;
+  const handler = buildRegisteredHandler({
+    createDeploymentConfirmationFn: async () => {
+      confirmationCreated = true;
+      return { token: "should-not-be-created" };
+    },
+    deployConfig: { digitaloceanToken: "token", doAppIdProd: "prod-app" },
+    enableGateControl: true,
+    getActiveDeploymentRunFn: async () => null,
+    getDeploymentGateStateFn: async () => ({ status: "open" }),
+    getLastProdDeployAtFn: async () => new Date(0),
+    listBlockingPullRequestsFn: async () => [{
+      force_deploy_blocked: false,
+      pr_number: 3958,
+      repo: "croft-eng/croft",
+      status: "untested",
+    }],
+    listDeployablePullRequestsForDeploymentFn: async () => [{
+      force_deploy_blocked: true,
+      pr_number: 3958,
+      repo: "croft-eng/croft",
+      status: "untested",
+    }],
+    pool: {},
+    resolveDeployAccessFn: async () => ({ canDeploy: true }),
+  });
+
+  const payload = await runCommand(handler, "deploy prod");
+
+  assert.match(payload.text, /Force deploy blocked/);
+  assert.match(payload.text, /must-test and cannot be bypassed/);
+  assert.equal(confirmationCreated, false);
+});
+
 test("Slack action values execute through the same command router", async () => {
   let actionHandler;
   registerCalypsoCommand({

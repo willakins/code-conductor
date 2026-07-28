@@ -1,7 +1,10 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
 
-const { evaluateDeploymentGate } = require("../../src/shared/gate_decision");
+const {
+  evaluateDeploymentGate,
+  readMustTestBlockingPullRequests,
+} = require("../../src/shared/gate_decision");
 
 test("explicit gate state is authoritative over the channel topic", () => {
   const decision = evaluateDeploymentGate({
@@ -39,4 +42,16 @@ test("staging gate ignores production PR blockers", () => {
 
   assert.equal(decision.allowed, true);
   assert.deepEqual(decision.blockingPullRequests, []);
+});
+
+test("must-test filtering excludes ordinary untested and already tested PRs", () => {
+  const blockers = readMustTestBlockingPullRequests([
+    { force_deploy_blocked: false, pr_number: 1, status: "untested" },
+    { force_deploy_blocked: true, pr_number: 2, status: "untested" },
+    { force_deploy_blocked: true, pr_number: 3, status: "tested" },
+  ]);
+
+  assert.deepEqual(blockers, [
+    { force_deploy_blocked: true, pr_number: 2, status: "untested" },
+  ]);
 });

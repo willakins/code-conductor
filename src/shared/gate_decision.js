@@ -63,6 +63,16 @@ function normalizeTopicAvailability(value) {
   return "unknown";
 }
 
+function readMustTestBlockingPullRequests(pullRequests) {
+  return (Array.isArray(pullRequests) ? pullRequests : []).filter((pullRequest) => {
+    const status = String(pullRequest?.status || "").trim().toLowerCase();
+    return pullRequest?.force_deploy_blocked === true
+      && status !== "tested"
+      && status !== "deployed";
+  });
+}
+
 module.exports = {
   evaluateDeploymentGate,
+  readMustTestBlockingPullRequests,
 };

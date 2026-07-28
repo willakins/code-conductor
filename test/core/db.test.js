@@ -336,6 +336,7 @@ test("listDeployablePullRequestsForDeployment returns tested PRs up to deploymen
   assert.match(captured.sql, /merged_at <= \$2/);
   assert.match(captured.sql, /status = ANY\(\$3::text\[\]\)/);
   assert.match(captured.sql, /author_login/);
+  assert.match(captured.sql, /force_deploy_blocked/);
   assert.deepEqual(captured.params, [sinceTimestamp, deploymentCutoffAt, ["tested"]]);
 });
 

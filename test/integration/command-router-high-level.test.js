@@ -3,7 +3,7 @@ const test = require("node:test");
 
 const { registerCalypsoCommand } = require("../../src/commands/command_router");
 
-test("high-level command lifecycle: status -> tested -> deploy -> status", async () => {
+test("high-level command lifecycle: status -> forced deploy -> status", async () => {
   const state = createInMemoryState();
   const { app, commandHandler } = createCommandHandler({
     enableDeploymentCompletionNotifications: true,
@@ -19,13 +19,18 @@ test("high-level command lifecycle: status -> tested -> deploy -> status", async
         (pr) =>
           pr.merged_at > lastDeployAt && pr.status !== "tested" && pr.status !== "deployed",
       ),
-    listDeployablePullRequestsForDeploymentFn: async (_pool, lastDeployAt, deploymentCutoffAt) =>
+    listDeployablePullRequestsForDeploymentFn: async (
+      _pool,
+      lastDeployAt,
+      deploymentCutoffAt,
+      { includeUntested } = {},
+    ) =>
       state.pullRequests
         .filter(
           (pr) =>
             pr.merged_at > lastDeployAt &&
             pr.merged_at <= deploymentCutoffAt &&
-            pr.status === "tested",
+            (pr.status === "tested" || (includeUntested && pr.status === "untested")),
         )
         .map(mapPullRequestForDeployment),
     markPullRequestTestedFn: async (_pool, prNumber, testedBy) => {
@@ -78,33 +83,26 @@ test("high-level command lifecycle: status -> tested -> deploy -> status", async
   assert.equal(app.commandName, "/calypso");
 
   const statusBefore = await runSlashCommand(commandHandler, "status", "U_TESTER");
-  const deployBlocked = await runSlashCommand(commandHandler, "deploy prod", "U_TESTER");
-  const markTested = await runSlashCommand(commandHandler, "tested 700", "U_TESTER");
   const deployResponses = await runSlashCommandResponses(commandHandler, "deploy prod", "U_TESTER");
   const deployStarted = deployResponses[0];
   const deploySuccess = deployResponses[1];
   const statusAfter = await runSlashCommand(commandHandler, "status", "U_TESTER");
 
-  assert.match(statusBefore.text, /Blocking PRs since last prod deploy/);
-  assert.match(
-    statusBefore.text,
-    /<https:\/\/github\.com\/croft-eng\/croft\/pull\/700\|croft-eng\/croft#700> \(untested\)/,
-  );
+  assert.match(statusBefore.text, /No blockers since last prod deploy/);
+  assert.match(statusBefore.text, /1 ordinary untested PR\(s\) will be included by force deploy/);
   assert.equal(statusBefore.blocks[0].type, "header");
-  assert.match(statusBefore.blocks[0].text.text, /Production deploy is blocked/);
+  assert.match(statusBefore.blocks[0].text.text, /Production deploy is clear/);
   assert.match(
     statusBefore.blocks.find((block) => block.type === "section" && block.text)?.text.text,
-    /testing before the next production deploy/,
+    /will be included by force deploy/,
   );
+  assert.match(JSON.stringify(statusBefore.blocks), /Review deployment/);
 
-  assert.match(deployBlocked.text, /Deploy blocked due to untested PRs/);
-  assert.match(deployBlocked.blocks[0].text.text, /Production deployment blocked/);
-  assert.match(markTested.text, /Marked PR #700 as tested/);
   assert.equal(deployStarted.response_type, "in_channel");
   assert.match(deployStarted.text, /Deploy to prod is in progress \(id: dep-999\)/);
   assert.match(deployStarted.text, /Triggered by <@U_TESTER>/);
   assert.match(deployStarted.text, /PRs to deploy:/);
-  assert.match(deployStarted.text, /Feature PR> by <@U123ABC> \(tested\)\./);
+  assert.match(deployStarted.text, /Feature PR> by <@U123ABC>\./);
   assert.doesNotMatch(deployStarted.text, /Marked 1 PR\(s\) deployed/);
   assert.match(deployStarted.blocks[0].text.text, /Production deployment started/);
   const changesIncludedBlock = deployStarted.blocks.find(
@@ -122,7 +120,7 @@ test("high-level command lifecycle: status -> tested -> deploy -> status", async
   assert.match(deploySuccess.text, /Deployed PRs:/);
   assert.match(
     deploySuccess.text,
-    /<https:\/\/github\.com\/croft-eng\/croft\/pull\/700\|Feature PR> by <@U123ABC> \(tested\)\./,
+    /<https:\/\/github\.com\/croft-eng\/croft\/pull\/700\|Feature PR> by <@U123ABC>\./,
   );
   assert.match(deploySuccess.blocks[0].text.text, /Production deployment complete/);
   assert.match(statusAfter.text, /No blockers since last prod deploy/);
@@ -131,7 +129,7 @@ test("high-level command lifecycle: status -> tested -> deploy -> status", async
   assert.deepEqual(state.transactionStatements, ["BEGIN", "COMMIT"]);
   assert.equal(state.deployments.length, 1);
   assert.equal(state.pullRequests[0].status, "deployed");
-  assert.equal(state.pullRequests[0].tested_by, "U_TESTER");
+  assert.equal(state.pullRequests[0].tested_by, undefined);
 });
 
 function mapPullRequestForDeployment(pullRequest) {

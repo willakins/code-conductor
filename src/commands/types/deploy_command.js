@@ -5,7 +5,10 @@ const { formatPullRequestReference } = require("../../util/format");
 const {
   readDeployAvailabilityFromTopic,
 } = require("../../shared/deploy_availability");
-const { evaluateDeploymentGate } = require("../../shared/gate_decision");
+const {
+  evaluateDeploymentGate,
+  readMustTestBlockingPullRequests,
+} = require("../../shared/gate_decision");
 
 class DeployCommand extends BaseCalypsoCommand {
   constructor() {
@@ -94,44 +97,20 @@ class DeployCommand extends BaseCalypsoCommand {
     if (isProductionDeploy) {
       deployGateState = await this.readDeployGateState(runtime);
     }
+    const deploymentBlockingPullRequests = isProductionDeploy
+      ? readMustTestBlockingPullRequests(deployGateState.blockingPullRequests)
+      : [];
     const gateDecision = await this.readGateDecision({
-      blockingPullRequests: deployGateState.blockingPullRequests,
+      blockingPullRequests: deploymentBlockingPullRequests,
       deployEnvironment,
       runtime,
     });
     if (!gateDecision.allowed) {
-      const onlyPullRequestBlockers = gateDecision.reasons.every(
-        (reason) => reason.code === "untested_pull_requests",
-      );
-      const topicBlocked = gateDecision.reasons.some(
-        (reason) => reason.code === "channel_topic_blocked",
-      );
-      const responseLead = onlyPullRequestBlockers
-        ? "Deploy blocked due to untested PRs:"
-        : topicBlocked
-          ? `Cannot deploy to ${deployEnvironment} from this channel right now.`
-          : `Cannot deploy to ${deployEnvironment}:`;
-      return this.buildExecutionResult(
-        [
-          responseLead,
-          ...gateDecision.reasons.map((reason) =>
-            reason.code === "channel_topic_blocked"
-              ? "• Channel topic indicates deploy is not allowed for that environment (red status)."
-              : `• ${reason.message}`),
-          ...(onlyPullRequestBlockers
-            ? deployGateState.blockingPullRequests.map(
-                (pr) =>
-                  `• ${formatPullRequestReference({ repo: pr.repo, prNumber: pr.pr_number, url: pr.url })} (${pr.status})`,
-              )
-            : []),
-        ].join("\n"),
-        {
-          presentation: buildBlockedDeploymentPresentation(
-            deployGateState.blockingPullRequests,
-            gateDecision,
-          ),
-        },
-      );
+      return this.buildBlockedDeploymentResult({
+        blockingPullRequests: deploymentBlockingPullRequests,
+        deployEnvironment,
+        gateDecision,
+      });
     }
 
     const deployConfiguration = this.resolveDeployConfiguration(
@@ -151,25 +130,31 @@ class DeployCommand extends BaseCalypsoCommand {
     }
 
     if (runtime.enableGateControl && parsedCommand.action !== "deploy_confirm") {
+      const productionDeploymentPlan = isProductionDeploy
+        ? await this.readProductionDeploymentPlan({
+            runtime,
+            lastProductionDeploymentAt: deployGateState.lastProductionDeploymentAt,
+            includeUntested: true,
+          })
+        : { mustTestBlockingPullRequests: [], plannedPullRequests: [] };
+      const plannedMustTestBlock = this.buildPlannedMustTestBlockResult(
+        productionDeploymentPlan.mustTestBlockingPullRequests,
+      );
+      if (plannedMustTestBlock) {
+        return plannedMustTestBlock;
+      }
       const confirmation = await runtime.createDeploymentConfirmationFn(runtime.pool, {
         environment: deployEnvironment,
         requestedBy: runtime.userId,
         token: randomUUID(),
       });
-      const plannedPullRequests = isProductionDeploy
-        ? (await this.readProductionDeploymentPlan({
-            runtime,
-            lastProductionDeploymentAt: deployGateState.lastProductionDeploymentAt,
-            includeUntested: false,
-          })).plannedPullRequests
-        : [];
       return this.buildExecutionResult(
         `${formatEnvironmentLabel(deployEnvironment)} deployment is ready for confirmation.`,
         {
           presentation: buildDeploymentConfirmationPresentation({
             confirmation,
             deployEnvironment,
-            plannedPullRequests,
+            plannedPullRequests: productionDeploymentPlan.plannedPullRequests,
           }),
         },
       );
@@ -198,9 +183,15 @@ class DeployCommand extends BaseCalypsoCommand {
         ? await this.readProductionDeploymentPlan({
             runtime,
             lastProductionDeploymentAt: deployGateState.lastProductionDeploymentAt,
-            includeUntested: false,
+            includeUntested: true,
           })
         : null;
+      const plannedMustTestBlock = this.buildPlannedMustTestBlockResult(
+        productionDeploymentPlan?.mustTestBlockingPullRequests,
+      );
+      if (plannedMustTestBlock) {
+        return plannedMustTestBlock;
+      }
       const reservation = runtime.enableGateControl
         ? await runtime.reserveDeploymentRunFn(runtime.pool, {
             actorUserId: runtime.userId,
@@ -387,6 +378,66 @@ class DeployCommand extends BaseCalypsoCommand {
     }
   }
 
+  buildBlockedDeploymentResult({
+    blockingPullRequests,
+    deployEnvironment,
+    gateDecision,
+  }) {
+    const onlyPullRequestBlockers = gateDecision.reasons.every(
+      (reason) => reason.code === "untested_pull_requests",
+    );
+    const topicBlocked = gateDecision.reasons.some(
+      (reason) => reason.code === "channel_topic_blocked",
+    );
+    const responseLead = onlyPullRequestBlockers
+      ? "Force deploy blocked."
+      : topicBlocked
+        ? `Cannot deploy to ${deployEnvironment} from this channel right now.`
+        : `Cannot deploy to ${deployEnvironment}:`;
+    return this.buildExecutionResult(
+      [
+        responseLead,
+        ...gateDecision.reasons.map((reason) =>
+          reason.code === "channel_topic_blocked"
+            ? "• Channel topic indicates deploy is not allowed for that environment (red status)."
+            : reason.code === "untested_pull_requests"
+              ? "• These PRs are marked as must-test and cannot be bypassed:"
+              : `• ${reason.message}`),
+        ...(onlyPullRequestBlockers
+          ? blockingPullRequests.map(
+              (pr) =>
+                `• ${formatPullRequestReference({ repo: pr.repo, prNumber: pr.pr_number, url: pr.url })} (${pr.status})`,
+            )
+          : []),
+        ...(onlyPullRequestBlockers
+          ? ["Mark them tested with `/calypso tested <PR_NUMBER>` or clear the requirement with `/calypso must-test off <PR_NUMBER>`."]
+          : []),
+      ].join("\n"),
+      {
+        presentation: buildBlockedDeploymentPresentation(
+          blockingPullRequests,
+          gateDecision,
+        ),
+      },
+    );
+  }
+
+  buildPlannedMustTestBlockResult(plannedPullRequests) {
+    const blockers = readMustTestBlockingPullRequests(plannedPullRequests);
+    if (blockers.length === 0) {
+      return null;
+    }
+
+    return this.buildBlockedDeploymentResult({
+      blockingPullRequests: blockers,
+      deployEnvironment: "prod",
+      gateDecision: evaluateDeploymentGate({
+        blockingPullRequests: blockers,
+        environment: "prod",
+      }),
+    });
+  }
+
   async readDeployGateState(runtime) {
     if (!runtime.pool || typeof runtime.pool.query !== "function") {
       const lastProductionDeploymentAt = await runtime.getLastProdDeployAtFn(runtime.pool);
@@ -423,6 +474,7 @@ class DeployCommand extends BaseCalypsoCommand {
 
     return {
       deploymentCutoffAt,
+      mustTestBlockingPullRequests: readMustTestBlockingPullRequests(plannedPullRequests),
       plannedPullRequests: normalizeDeployedPullRequests(plannedPullRequests),
     };
   }
@@ -605,13 +657,20 @@ class DeployCommand extends BaseCalypsoCommand {
 function buildBlockedDeploymentPresentation(blockingPullRequests, gateDecision) {
   const blockers = Array.isArray(blockingPullRequests) ? blockingPullRequests : [];
   const environmentLabel = formatEnvironmentLabel(gateDecision?.environment);
+  const hasMustTestBlockers = gateDecision.reasons.some(
+    (reason) => reason.code === "untested_pull_requests",
+  );
 
   return {
     tone: "danger",
     title: gateDecision.reasons.some((reason) => reason.code === "channel_topic_blocked")
       ? `${environmentLabel} deployment unavailable`
       : `${environmentLabel} deployment blocked`,
-    summary: gateDecision.reasons.map((reason) => reason.message).join(" "),
+    summary: gateDecision.reasons.map((reason) =>
+      reason.code === "untested_pull_requests"
+        ? `${blockers.length} PR(s) explicitly require testing before production deployment.`
+        : reason.message,
+    ).join(" "),
     facts: [
       {
         label: "Environment",
@@ -624,7 +683,7 @@ function buildBlockedDeploymentPresentation(blockingPullRequests, gateDecision) 
     ],
     sections: blockers.length > 0 ? [
       {
-        title: "Needs testing",
+        title: hasMustTestBlockers ? "Must test" : "Needs testing",
         items: blockers.map((pullRequest) => ({
           title: [
             `${String(pullRequest?.repo || "").trim()}#${pullRequest?.pr_number}`,
@@ -635,7 +694,9 @@ function buildBlockedDeploymentPresentation(blockingPullRequests, gateDecision) 
         })),
       },
     ] : [],
-    context: "Resolve the listed gate reasons, then refresh status.",
+    context: hasMustTestBlockers
+      ? "Mark these PRs tested, or clear their must-test requirement, then retry."
+      : "Resolve the listed gate reasons, then refresh status.",
     actions: [
       { id: "refresh_status", label: "Refresh status", command: "status" },
       { id: "view_history", label: "View history", command: `history ${gateDecision.environment}` },

@@ -3,8 +3,9 @@
 Calypso is a platform-abstracted deployment gatekeeper for a single repository workflow.
 It currently runs with Slack + GitHub + DigitalOcean by default, while exposing provider
 abstractions for communication, code-host, deploy, email, AI, and error-tracking integrations.
-It tracks merged pull requests in Postgres, requires explicit testing confirmation,
-blocks production deploys when untested changes exist, posts scheduled review recap messages,
+It tracks merged pull requests in Postgres, records explicit testing confirmation,
+force-includes ordinary untested changes in production deploys while honoring explicit `must-test`
+requirements, posts scheduled review recap messages,
 can poll one environment health endpoint for outage alerts, and can track customer support
 emails from Gmail or Outlook as an actionable queue, can draft support-email replies through
 OpenAI or Anthropic, and can poll Sentry or Rollbar for newly tracked unresolved error groups.
@@ -59,7 +60,8 @@ OpenAI or Anthropic, and can poll Sentry or Rollbar for newly tracked unresolved
   - `/calypso deploy staging`
   - `/calypso deploy prod`
 - Enforces deploy blocking rules:
-  - A blocker is any PR with `merged_at > last_prod_deploy_at` and `status` not in `tested`, `deployed`.
+  - `/calypso deploy prod` implicitly force-deploys ordinary untested PRs.
+  - An untested PR blocks that deploy only when it is explicitly marked with `/calypso must-test`.
 - Optionally triggers deploy-platform production deploy when gate is clear, then records deployed PRs only after provider completion succeeds.
 - Optionally triggers staging deploy directly when staging app/pipeline is configured.
 - Optionally polls one configured environment URL and posts transition-based outage/recovery alerts.
@@ -960,9 +962,11 @@ Rules:
 `/calypso status`
 
 - Shows the single gate decision used by both status and deploy, including explicit gate state,
-  fallback channel-topic state, untested PRs, and an active deployment run.
+  fallback channel-topic state, explicit `must-test` PRs, and an active deployment run.
+- Lists ordinary untested PRs as an informational testing queue; they do not make production
+  deployment status blocked and are included by the forced production deploy.
 - If no deployments exist, baseline is epoch (`1970-01-01T00:00:00.000Z`).
-- Uses a scannable rich message with the gate state, blocker count, last production deploy,
+- Uses a scannable rich message with the gate state, `must-test` count, last production deploy,
   and a separate linked list of PRs that still need testing.
 - Reports the production channel-topic marker independently from PR blockers. A red production
   marker makes the overall status blocked when no explicit gate state has been set.
@@ -1062,14 +1066,15 @@ Rules:
 
 `/calypso deploy prod`
 
-- Uses the same unified gate decision as `/calypso status`.
+- Implicitly uses force-deploy behavior, so ordinary untested PRs are included rather than blocking.
 - Requires a second server-validated confirmation before calling the deploy provider. Confirmations
   are single-use, expire after 10 minutes, and can only be used by the requesting user on Slack or Teams.
-- Blocks when the explicit/fallback environment gate is closed, untested blockers exist, or
-  another deployment run is active.
+- Blocks when the explicit/fallback environment gate is closed, an untested PR is explicitly marked
+  `must-test`, or another deployment run is active.
 - Access restricted to workspace admins and whitelisted users.
 - Blocks when channel topic marks production as red.
-- If no blockers and DigitalOcean env vars missing, returns "deploy not configured".
+- If no operational or `must-test` blockers exist and DigitalOcean env vars are missing, returns
+  "deploy not configured".
 - If configured and deploy is initiated:
   - shows the triggering Slack user as a Slack mention
   - includes a `PRs to deploy` list with PR title links and mapped author handles

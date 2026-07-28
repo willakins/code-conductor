@@ -41,7 +41,8 @@ test("handleCalypsoCommand returns deploy topic help for testing alias", () => {
   assert.match(result.responseText, /\/calypso tested <PR_NUMBER>/);
   assert.match(result.responseText, /\/calypso deploy list/);
   assert.match(result.responseText, /\/calypso config deploy-environment:prod\|staging/);
-  assert.doesNotMatch(result.responseText, /force/);
+  assert.match(result.responseText, /forced production deploy/);
+  assert.match(result.responseText, /only explicit must-test PRs block/);
 });
 
 test("handleCalypsoCommand returns reviews topic help for reviewing alias", () => {
@@ -739,12 +740,12 @@ test("registerCalypsoCommand status reports a production red channel topic", asy
   });
 
   assert.match(payload.text, /Production deployment is blocked by the channel topic/);
-  assert.match(payload.text, /No untested PR blockers since last prod deploy/);
+  assert.match(payload.text, /No must-test PR blockers since last prod deploy/);
   assert.match(payload.blocks[0].text.text, /Production deploy is blocked/);
   const renderedBlocks = JSON.stringify(payload.blocks);
   assert.match(renderedBlocks, /Channel topic/);
   assert.match(renderedBlocks, /Blocked/);
-  assert.match(renderedBlocks, /Blocking PRs/);
+  assert.match(renderedBlocks, /Must-test PRs/);
   assert.match(renderedBlocks, /Change the channel's Production topic marker from red/);
 });
 
@@ -1249,7 +1250,7 @@ test("registerCalypsoCommand shows recently tested PRs for tested recent", async
   assert.match(payload.text, /tested by Willa on February 13th, 2026 at 3:00 PM EST/);
 });
 
-test("registerCalypsoCommand blocks deploy when blockers exist", async () => {
+test("registerCalypsoCommand blocks deploy when a PR is explicitly marked must-test", async () => {
   let commandHandler;
 
   const app = {
@@ -1264,6 +1265,7 @@ test("registerCalypsoCommand blocks deploy when blockers exist", async () => {
     getLastProdDeployAtFn: async () => "1970-01-01T00:00:00.000Z",
     listBlockingPullRequestsFn: async () => [
       {
+        force_deploy_blocked: true,
         repo: "croft-eng/croft",
         pr_number: 12,
         url: "https://github.com/croft-eng/croft/pull/12",
@@ -1283,8 +1285,10 @@ test("registerCalypsoCommand blocks deploy when blockers exist", async () => {
   });
 
   assert.equal(payload.response_type, "ephemeral");
-  assert.match(payload.text, /Deploy blocked due to untested PRs/);
+  assert.match(payload.text, /Force deploy blocked/);
+  assert.match(payload.text, /must-test and cannot be bypassed/);
   assert.match(payload.text, /<https:\/\/github.com\/croft-eng\/croft\/pull\/12\|croft-eng\/croft#12> \(untested\)/);
+  assert.match(payload.text, /\/calypso must-test off <PR_NUMBER>/);
 });
 
 test("registerCalypsoCommand blocks prod deploy when channel topic marks production red", async () => {

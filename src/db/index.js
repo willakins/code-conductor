@@ -267,6 +267,7 @@ async function listDeployablePullRequestsForDeployment(
       status,
       tested_at,
       merged_at,
+      force_deploy_blocked,
       (
         SELECT author_login
         FROM open_pr_review_state
