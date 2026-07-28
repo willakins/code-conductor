@@ -1332,6 +1332,7 @@ test("registerCalypsoCommand blocks staging deploy when channel topic marks stag
   assert.equal(payload.response_type, "ephemeral");
   assert.match(payload.text, /Cannot deploy to staging from this channel right now/);
   assert.match(payload.text, /Channel topic indicates deploy is not allowed/);
+  assert.match(payload.blocks[0].text.text, /Staging deployment unavailable/);
   assert.equal(deployTriggered, false);
 });
 
@@ -1443,6 +1444,10 @@ test("registerCalypsoCommand triggers staging deploy without deploy-gate transac
   assert.equal(payload.response_type, "in_channel");
   assert.match(payload.text, /Deploy to staging is in progress \(id: dep-stg-123\)/);
   assert.match(payload.text, /Triggered by <@U123>/);
+  assert.match(
+    payload.blocks.find((block) => block.type === "context").elements[0].text,
+    /handed off to the configured provider/,
+  );
   assert.deepEqual(queryCalls, []);
   assert.equal(capturedDeployConfiguration.deployTargetEnvironment, "staging");
   assert.equal(capturedDeployConfiguration.deployProductionAppId, "app-id-staging");
@@ -1560,6 +1565,8 @@ test("registerCalypsoCommand sends staging deployment completion follow-up with 
     responses[1].text,
     /Deployment dep-stg-abc finished successfully with phase ACTIVE/,
   );
+  assert.match(responses[0].blocks[0].text.text, /Staging deployment started/);
+  assert.match(responses[1].blocks[0].text.text, /Staging deployment complete/);
   assert.equal(completionWaitConfig.deployTargetEnvironment, "staging");
   assert.equal(completionWaitConfig.deployProductionAppId, "app-id-staging");
 });
@@ -1744,6 +1751,11 @@ test("registerCalypsoCommand tags here when deployment completion fails", async 
     /<!here> Deployment dep-abc failed after trigger: deployment errored/,
   );
   assert.match(responses[1].text, /No deploy records or PR statuses were committed/);
+  assert.match(responses[1].blocks[0].text.text, /Deployment failed/);
+  assert.match(
+    responses[1].blocks.find((block) => block.type === "context").elements[0].text,
+    /No deployment record or PR status was committed/,
+  );
   assert.equal(inserted, false);
   assert.equal(marked, false);
 });
@@ -1836,6 +1848,7 @@ test("registerCalypsoCommand returns deploy not configured when clear", async ()
 
   assert.equal(payload.response_type, "ephemeral");
   assert.match(payload.text, /deploy not configured/i);
+  assert.match(payload.blocks[0].text.text, /Production deployment is not configured/);
 });
 
 test("registerCalypsoCommand returns staging deploy not configured when staging app id is missing", async () => {
@@ -1867,6 +1880,7 @@ test("registerCalypsoCommand returns staging deploy not configured when staging 
 
   assert.equal(payload.response_type, "ephemeral");
   assert.match(payload.text, /Deploy to staging is not configured/);
+  assert.match(payload.blocks[0].text.text, /Staging deployment is not configured/);
 });
 
 test("registerCalypsoCommand triggers deploy and reports planned PRs when clear and configured", async () => {

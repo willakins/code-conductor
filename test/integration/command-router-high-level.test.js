@@ -90,8 +90,15 @@ test("high-level command lifecycle: status -> tested -> deploy -> status", async
     statusBefore.text,
     /<https:\/\/github\.com\/croft-eng\/croft\/pull\/700\|croft-eng\/croft#700> \(untested\)/,
   );
+  assert.equal(statusBefore.blocks[0].type, "header");
+  assert.match(statusBefore.blocks[0].text.text, /Production deploy is blocked/);
+  assert.match(
+    statusBefore.blocks.find((block) => block.type === "section" && block.text)?.text.text,
+    /testing before the next production deploy/,
+  );
 
   assert.match(deployBlocked.text, /Deploy blocked due to untested PRs/);
+  assert.match(deployBlocked.blocks[0].text.text, /Production deployment blocked/);
   assert.match(markTested.text, /Marked PR #700 as tested/);
   assert.equal(deployStarted.response_type, "in_channel");
   assert.match(deployStarted.text, /Deploy to prod is in progress \(id: dep-999\)/);
@@ -99,6 +106,16 @@ test("high-level command lifecycle: status -> tested -> deploy -> status", async
   assert.match(deployStarted.text, /PRs to deploy:/);
   assert.match(deployStarted.text, /Feature PR> by <@U123ABC> \(tested\)\./);
   assert.doesNotMatch(deployStarted.text, /Marked 1 PR\(s\) deployed/);
+  assert.match(deployStarted.blocks[0].text.text, /Production deployment started/);
+  const changesIncludedBlock = deployStarted.blocks.find(
+    (block) =>
+      block.type === "section"
+      && block.text?.text.includes("Changes included"),
+  );
+  assert.match(
+    changesIncludedBlock.text.text,
+    /Feature PR/,
+  );
   assert.equal(deploySuccess.response_type, "in_channel");
   assert.match(deploySuccess.text, /Deployment dep-999 finished successfully with phase ACTIVE/);
   assert.match(deploySuccess.text, /Marked 1 PR\(s\) deployed/);
@@ -107,7 +124,9 @@ test("high-level command lifecycle: status -> tested -> deploy -> status", async
     deploySuccess.text,
     /<https:\/\/github\.com\/croft-eng\/croft\/pull\/700\|Feature PR> by <@U123ABC> \(tested\)\./,
   );
+  assert.match(deploySuccess.blocks[0].text.text, /Production deployment complete/);
   assert.match(statusAfter.text, /No blockers since last prod deploy/);
+  assert.match(statusAfter.blocks[0].text.text, /Production deploy is clear/);
 
   assert.deepEqual(state.transactionStatements, ["BEGIN", "COMMIT"]);
   assert.equal(state.deployments.length, 1);

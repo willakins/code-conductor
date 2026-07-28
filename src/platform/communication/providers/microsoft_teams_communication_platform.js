@@ -4,6 +4,7 @@ const {
   shouldSendDeployProdTip,
 } = require("../deploy_prod_tip");
 const { BaseCommunicationPlatform } = require("../base_communication_platform");
+const { buildCommunicationMessage } = require("../message_renderer");
 
 const DEFAULT_TEAMS_COMMAND_PATH = "/communication/commands";
 
@@ -86,6 +87,9 @@ class MicrosoftTeamsCommunicationPlatform extends BaseCommunicationPlatform {
         response.status(200).json({
           type: "message",
           text: finalResponse?.text || `${this.botName} command completed.`,
+          ...(Array.isArray(finalResponse?.attachments)
+            ? { attachments: finalResponse.attachments }
+            : {}),
         });
       } catch (error) {
         console.error("Failed to process Microsoft Teams command.");
@@ -106,17 +110,26 @@ class MicrosoftTeamsCommunicationPlatform extends BaseCommunicationPlatform {
     return;
   }
 
-  async postChannelMessage({ text }) {
+  async postChannelMessage({ presentation, text }) {
     if (!this.teamsWebhookUrl) {
       throw new Error("Microsoft Teams webhook URL is not configured.");
     }
 
+    const messagePayload = buildCommunicationMessage({
+      provider: "microsoft_teams",
+      text,
+      presentation,
+    });
     const response = await fetch(this.teamsWebhookUrl, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({ text }),
+      body: JSON.stringify(
+        messagePayload.attachments
+          ? { type: "message", ...messagePayload }
+          : messagePayload,
+      ),
     });
 
     if (!response.ok) {

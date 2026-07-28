@@ -54,6 +54,61 @@ test("microsoft teams platform registers command route and responds", async () =
   assert.equal(await platform.isWorkspaceAdmin("UNAUTHORIZED"), false);
 });
 
+test("microsoft teams platform renders status as an adaptive card", async () => {
+  const platform = new MicrosoftTeamsCommunicationPlatform({
+    config: {
+      botName: "Calypso",
+    },
+  });
+  platform.registerCalypsoCommand({
+    pool: {},
+    getLastProdDeployAtFn: async () => new Date("2026-07-28T14:00:00.000Z"),
+    listBlockingPullRequestsFn: async () => [
+      {
+        repo: "acme/widgets",
+        pr_number: 42,
+        status: "untested",
+        title: "Improve deploy controls",
+        url: "https://example.test/acme/widgets/pull/42",
+      },
+    ],
+    readTimeFormatPreferenceFn: async () => "legacy_utc",
+    readTimeZonePreferenceFn: async () => "UTC",
+  });
+
+  const routes = [];
+  platform.registerHttpRoutes({
+    post(path, handler) {
+      routes.push({ path, handler });
+    },
+  });
+
+  const response = createResponseRecorder();
+  await routes[0].handler(
+    {
+      body: {
+        text: "/calypso status",
+        from: {
+          id: "U123",
+          name: "Will",
+        },
+      },
+      headers: {},
+    },
+    response,
+  );
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.payload.attachments.length, 1);
+  assert.equal(
+    response.payload.attachments[0].contentType,
+    "application/vnd.microsoft.card.adaptive",
+  );
+  const cardText = JSON.stringify(response.payload.attachments[0].content.body);
+  assert.match(cardText, /Production deploy is blocked/);
+  assert.match(cardText, /\[acme\/widgets#42 — Improve deploy controls\]/);
+});
+
 test("microsoft teams platform returns 400 for missing command text", async () => {
   const platform = new MicrosoftTeamsCommunicationPlatform({
     config: {},

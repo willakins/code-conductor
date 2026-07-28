@@ -6,6 +6,7 @@ const {
   shouldSendDeployProdTip,
 } = require("../deploy_prod_tip");
 const { BaseCommunicationPlatform } = require("../base_communication_platform");
+const { buildCommunicationMessage } = require("../message_renderer");
 
 class SlackCommunicationPlatform extends BaseCommunicationPlatform {
   constructor({ config, app } = {}) {
@@ -35,11 +36,15 @@ class SlackCommunicationPlatform extends BaseCommunicationPlatform {
     await this.app.start();
   }
 
-  async postChannelMessage({ channelId, mrkdwn = true, text }) {
+  async postChannelMessage({ channelId, mrkdwn = true, presentation, text }) {
     await this.app.client.chat.postMessage({
       channel: channelId,
       mrkdwn,
-      text,
+      ...buildCommunicationMessage({
+        provider: "slack",
+        text,
+        presentation,
+      }),
     });
   }
 
