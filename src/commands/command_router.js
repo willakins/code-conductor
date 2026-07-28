@@ -1,6 +1,9 @@
 const { parseCalypsoCommand } = require("./parsing/command_parser");
 const { createCalypsoCommandService } = require("./services/command_service");
 const { DEFAULT_BOT_NAME } = require("../config");
+const {
+  buildCommunicationMessage,
+} = require("../platform/communication/message_renderer");
 
 const SLACK_HERE_MENTION = "<!here>";
 
@@ -29,24 +32,29 @@ function registerCalypsoCommand(app, options = {}) {
         communicationClient: client,
         currentChannelId: resolveCommandChannelId(command),
         currentChannelName: resolveCommandChannelName(command),
-        sendInterimResponseFn: async ({ responseType, text }) => {
-          await respond({
-            response_type: normalizeResponseType(responseType),
+        sendInterimResponseFn: async ({ responseType, text, presentation }) => {
+          await respond(buildCommandResponse({
+            communicationProvider: options.communicationProvider,
+            responseType,
             text,
-          });
+            presentation,
+          }));
         },
       });
 
-      await respond({
-        response_type: normalizeResponseType(executionResult.responseType),
+      await respond(buildCommandResponse({
+        communicationProvider: options.communicationProvider,
+        responseType: executionResult.responseType,
         text: executionResult.responseText,
-      });
+        presentation: executionResult.presentation,
+      }));
 
       await sendDeploymentCompletionFollowUpIfNeeded({
         calypsoCommandService,
         userId,
         executionResult,
         communicationClient: client,
+        communicationProvider: options.communicationProvider,
         respond,
       });
     } catch (error) {
@@ -63,6 +71,7 @@ function registerCalypsoCommand(app, options = {}) {
 async function sendDeploymentCompletionFollowUpIfNeeded({
   calypsoCommandService,
   communicationClient,
+  communicationProvider,
   executionResult,
   userId,
   respond,
@@ -95,31 +104,129 @@ async function sendDeploymentCompletionFollowUpIfNeeded({
   try {
     const { completionState, finalizationResult } = await completionWork;
 
-    await respond({
-      response_type: normalizeResponseType(
-        executionResult.followUpResponseType || executionResult.responseType,
-      ),
-      text: await buildDeploymentCompletionSuccessText({
-        calypsoCommandService,
-        communicationClient,
+    const successText = await buildDeploymentCompletionSuccessText({
+      calypsoCommandService,
+      communicationClient,
+      completionState,
+      executionResult,
+      externalDeploymentId,
+      finalizationResult,
+      userId,
+    });
+
+    await respond(buildCommandResponse({
+      communicationProvider,
+      responseType: executionResult.followUpResponseType || executionResult.responseType,
+      text: successText,
+      presentation: buildDeploymentCompletionSuccessPresentation({
         completionState,
         executionResult,
         externalDeploymentId,
         finalizationResult,
-        userId,
       }),
-    });
+    }));
   } catch (error) {
-    await respond({
-      response_type: normalizeResponseType(
-        executionResult.followUpResponseType || executionResult.responseType,
-      ),
-      text: buildDeploymentCompletionFailureText({
+    const failureText = buildDeploymentCompletionFailureText({
+      externalDeploymentId,
+      error,
+    });
+    await respond(buildCommandResponse({
+      communicationProvider,
+      responseType: executionResult.followUpResponseType || executionResult.responseType,
+      text: failureText,
+      presentation: buildDeploymentCompletionFailurePresentation({
         externalDeploymentId,
         error,
       }),
+    }));
+  }
+}
+
+function buildCommandResponse({
+  communicationProvider,
+  responseType,
+  text,
+  presentation,
+}) {
+  return {
+    response_type: normalizeResponseType(responseType),
+    ...buildCommunicationMessage({
+      provider: communicationProvider,
+      text,
+      presentation,
+    }),
+  };
+}
+
+function buildDeploymentCompletionSuccessPresentation({
+  completionState,
+  executionResult,
+  externalDeploymentId,
+  finalizationResult,
+}) {
+  const completionPhase = completionState?.phase || completionState?.status || "unknown";
+  const deployEnvironment =
+    executionResult.deployConfigOverrides?.deployTargetEnvironment || "prod";
+  const environmentLabel = deployEnvironment === "staging" ? "Staging" : "Production";
+  const deployedPullRequests = Array.isArray(finalizationResult?.deployedPullRequests)
+    ? finalizationResult.deployedPullRequests
+    : [];
+  const facts = [
+    {
+      label: "Deployment ID",
+      value: externalDeploymentId,
+    },
+    {
+      label: "Provider status",
+      value: String(completionPhase),
+    },
+  ];
+  if (finalizationResult) {
+    facts.push({
+      label: "PRs deployed",
+      value: String(finalizationResult.deployedPullRequestCount),
     });
   }
+
+  return {
+    tone: "success",
+    title: `${environmentLabel} deployment complete`,
+    summary: `${environmentLabel} finished successfully.`,
+    facts,
+    sections: finalizationResult
+      ? [
+          {
+            title: "Changes deployed",
+            text: deployedPullRequests.length === 0 ? "No PR details were available." : "",
+            items: deployedPullRequests.map((pullRequest) => ({
+              title: String(pullRequest?.title || "").trim()
+                || `${pullRequest?.repo}#${pullRequest?.pr_number}`,
+              url: pullRequest?.url || "",
+              description: `${pullRequest?.repo}#${pullRequest?.pr_number}`,
+            })),
+          },
+        ]
+      : [],
+    context: finalizationResult
+      ? "Deployment state and included PRs were committed together."
+      : "",
+  };
+}
+
+function buildDeploymentCompletionFailurePresentation({ externalDeploymentId, error }) {
+  const stateCommitFailed = error?.code === "DEPLOY_STATE_ROLLED_BACK";
+  return {
+    tone: "danger",
+    title: stateCommitFailed ? "Deployment state update failed" : "Deployment failed",
+    summary: error?.message || "The deploy provider reported a failure.",
+    facts: [
+      {
+        label: "Deployment ID",
+        value: externalDeploymentId,
+      },
+    ],
+    context: "No deployment record or PR status was committed.",
+  };
 }
 
 function buildDeploymentCompletionFailureText({ externalDeploymentId, error }) {

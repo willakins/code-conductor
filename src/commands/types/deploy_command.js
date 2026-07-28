@@ -74,7 +74,14 @@ class DeployCommand extends BaseCalypsoCommand {
       deployEnvironment,
     });
     if (!channelTopicGuardDecision.isAllowed) {
-      return this.buildExecutionResult(channelTopicGuardDecision.reasonText);
+      return this.buildExecutionResult(channelTopicGuardDecision.reasonText, {
+        presentation: {
+          tone: "danger",
+          title: `${formatEnvironmentLabel(deployEnvironment)} deployment unavailable`,
+          summary: channelTopicGuardDecision.reasonText,
+          context: "The channel topic currently marks this environment red.",
+        },
+      });
     }
     let deployGateState = {
       blockingPullRequests: [],
@@ -95,6 +102,11 @@ class DeployCommand extends BaseCalypsoCommand {
                 `• ${formatPullRequestReference({ repo: pr.repo, prNumber: pr.pr_number, url: pr.url })} (${pr.status})`,
             ),
           ].join("\n"),
+          {
+            presentation: buildBlockedDeploymentPresentation(
+              deployGateState.blockingPullRequests,
+            ),
+          },
         );
       }
     }
@@ -105,10 +117,14 @@ class DeployCommand extends BaseCalypsoCommand {
     );
     if (!this.hasDeployConfiguration(deployConfiguration)) {
       if (isProductionDeploy) {
-        return this.buildExecutionResult("Deploy gate is clear, but deploy not configured.");
+        return this.buildExecutionResult("Deploy gate is clear, but deploy not configured.", {
+          presentation: buildDeploymentNotConfiguredPresentation(deployEnvironment),
+        });
       }
 
-      return this.buildExecutionResult("Deploy to staging is not configured.");
+      return this.buildExecutionResult("Deploy to staging is not configured.", {
+        presentation: buildDeploymentNotConfiguredPresentation(deployEnvironment),
+      });
     }
 
     try {
@@ -147,6 +163,13 @@ class DeployCommand extends BaseCalypsoCommand {
             deployProvider,
             shouldNotifyDeploymentCompletion,
             deployConfigOverrides: this.buildDeployConfigOverridesForCompletion(deployConfiguration),
+            presentation: buildDeploymentStartedPresentation({
+              deployEnvironment,
+              deployProvider,
+              deploymentId,
+              deploymentTriggeredBy,
+              shouldNotifyDeploymentCompletion,
+            }),
           }),
         );
       }
@@ -170,11 +193,28 @@ class DeployCommand extends BaseCalypsoCommand {
             deployProvider,
             productionDeploymentPlan,
           }),
+          presentation: buildDeploymentStartedPresentation({
+            deployEnvironment,
+            deployProvider,
+            deploymentId,
+            deploymentTriggeredBy,
+            missingDeploymentIdText,
+            plannedPullRequests: productionDeploymentPlan.plannedPullRequests,
+            shouldNotifyDeploymentCompletion,
+          }),
         }),
       );
     } catch (error) {
       return this.buildExecutionResult(
         `Deploy failed before deployment state was committed: ${error.message}`,
+        {
+          presentation: {
+            tone: "danger",
+            title: "Deployment could not start",
+            summary: error.message,
+            context: "No deployment record or PR status was changed.",
+          },
+        },
       );
     }
   }
@@ -353,6 +393,7 @@ class DeployCommand extends BaseCalypsoCommand {
     shouldNotifyDeploymentCompletion,
     deployConfigOverrides,
     productionDeploymentFinalization,
+    presentation,
   }) {
     return {
       deployTriggered: true,
@@ -362,6 +403,7 @@ class DeployCommand extends BaseCalypsoCommand {
       shouldNotifyDeploymentCompletion,
       shouldFinalizeProductionDeployment: Boolean(productionDeploymentFinalization),
       productionDeploymentFinalization: productionDeploymentFinalization || null,
+      presentation: presentation || null,
     };
   }
 
@@ -382,6 +424,129 @@ class DeployCommand extends BaseCalypsoCommand {
       plannedPullRequests: productionDeploymentPlan.plannedPullRequests,
     };
   }
+}
+
+function buildBlockedDeploymentPresentation(blockingPullRequests) {
+  const blockers = Array.isArray(blockingPullRequests) ? blockingPullRequests : [];
+  const blockerLabel = blockers.length === 1 ? "PR still needs" : "PRs still need";
+
+  return {
+    tone: "danger",
+    title: "Production deployment blocked",
+    summary: `${blockers.length} ${blockerLabel} testing before production can deploy.`,
+    facts: [
+      {
+        label: "Environment",
+        value: "Production",
+      },
+      {
+        label: "Blocking PRs",
+        value: String(blockers.length),
+      },
+    ],
+    sections: [
+      {
+        title: "Needs testing",
+        items: blockers.map((pullRequest) => ({
+          title: [
+            `${String(pullRequest?.repo || "").trim()}#${pullRequest?.pr_number}`,
+            String(pullRequest?.title || "").trim(),
+          ].filter(Boolean).join(" — "),
+          url: pullRequest?.url || "",
+          description: `Status: ${String(pullRequest?.status || "untested").toLowerCase()}`,
+        })),
+      },
+    ],
+    context: "Verify each change, then run `/calypso tested <PR_NUMBER>`.",
+  };
+}
+
+function buildDeploymentStartedPresentation({
+  deployEnvironment,
+  deployProvider,
+  deploymentId,
+  deploymentTriggeredBy,
+  missingDeploymentIdText,
+  plannedPullRequests,
+  shouldNotifyDeploymentCompletion,
+}) {
+  const environmentLabel = formatEnvironmentLabel(deployEnvironment);
+  const pullRequests = Array.isArray(plannedPullRequests) ? plannedPullRequests : [];
+  const sections = [];
+
+  if (deployEnvironment === "prod") {
+    sections.push({
+      title: "Changes included",
+      text: pullRequests.length === 0 ? "No tested PRs are queued for this deployment." : "",
+      items: pullRequests.map((pullRequest) => ({
+        title: String(pullRequest?.title || "").trim()
+          || `${pullRequest?.repo}#${pullRequest?.pr_number}`,
+        url: pullRequest?.url || "",
+        description: `${pullRequest?.repo}#${pullRequest?.pr_number} · ${
+          pullRequest?.tested ? "Tested" : "Included"
+        }`,
+      })),
+    });
+  }
+
+  return {
+    tone: "info",
+    title: `${environmentLabel} deployment started`,
+    summary: missingDeploymentIdText || `${environmentLabel} is now deploying.`,
+    facts: [
+      {
+        label: "Deployment ID",
+        value: String(deploymentId || "n/a"),
+      },
+      {
+        label: "Provider",
+        value: formatProviderLabel(deployProvider),
+      },
+      {
+        label: "Triggered by",
+        value: deploymentTriggeredBy,
+      },
+    ],
+    sections,
+    context: missingDeploymentIdText
+      ? "Calypso will not update deployment state automatically."
+      : shouldNotifyDeploymentCompletion
+        ? "Calypso will post again when the provider reports completion."
+        : "The deployment was handed off to the configured provider.",
+  };
+}
+
+function buildDeploymentNotConfiguredPresentation(deployEnvironment) {
+  const environmentLabel = formatEnvironmentLabel(deployEnvironment);
+  return {
+    tone: "warning",
+    title: `${environmentLabel} deployment is not configured`,
+    summary: deployEnvironment === "prod"
+      ? "The deploy gate is clear, but Calypso cannot start production."
+      : "Calypso cannot start a staging deployment.",
+    facts: [
+      {
+        label: "Environment",
+        value: environmentLabel,
+      },
+    ],
+    context: "Configure the selected deploy provider and environment target, then try again.",
+  };
+}
+
+function formatEnvironmentLabel(deployEnvironment) {
+  return deployEnvironment === "prod" ? "Production" : "Staging";
+}
+
+function formatProviderLabel(provider) {
+  const normalizedProvider = String(provider || "").trim().toLowerCase();
+  if (normalizedProvider === "digitalocean") {
+    return "DigitalOcean";
+  }
+  if (normalizedProvider === "aws") {
+    return "AWS CodePipeline";
+  }
+  return normalizedProvider || "Unknown";
 }
 
 function normalizeDeployedPullRequests(deployedPullRequests) {
