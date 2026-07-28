@@ -97,6 +97,7 @@ test("high-level command lifecycle: status -> tested -> deploy -> status", async
   assert.match(deployStarted.text, /Deploy to prod is in progress \(id: dep-999\)/);
   assert.match(deployStarted.text, /Triggered by <@U_TESTER>/);
   assert.match(deployStarted.text, /PRs to deploy:/);
+  assert.match(deployStarted.text, /Feature PR> by <@U123ABC> \(tested\)\./);
   assert.doesNotMatch(deployStarted.text, /Marked 1 PR\(s\) deployed/);
   assert.equal(deploySuccess.response_type, "in_channel");
   assert.match(deploySuccess.text, /Deployment dep-999 finished successfully with phase ACTIVE/);
@@ -104,7 +105,7 @@ test("high-level command lifecycle: status -> tested -> deploy -> status", async
   assert.match(deploySuccess.text, /Deployed PRs:/);
   assert.match(
     deploySuccess.text,
-    /<https:\/\/github\.com\/croft-eng\/croft\/pull\/700\|Feature PR> by <@U123ABC>\./,
+    /<https:\/\/github\.com\/croft-eng\/croft\/pull\/700\|Feature PR> by <@U123ABC> \(tested\)\./,
   );
   assert.match(statusAfter.text, /No blockers since last prod deploy/);
 
@@ -121,6 +122,7 @@ function mapPullRequestForDeployment(pullRequest) {
     title: pullRequest.title || null,
     url: pullRequest.url || null,
     author_login: pullRequest.author_login || "unknown",
+    tested: pullRequest.status === "tested" || Boolean(pullRequest.tested_at),
   };
 }
 

@@ -40,6 +40,7 @@ const SLACK_USER_MENTION_PATTERN = /^<@([UW][A-Z0-9]+)(?:\|[^>]+)?>$/i;
 const SLACK_USER_ID_PATTERN = /^([UW][A-Z0-9]*[0-9][A-Z0-9]*)$/i;
 const SLACK_USERNAME_PATTERN = /^@?([a-z0-9][a-z0-9._-]*)$/i;
 const EMAIL_ON_CALL_COMMAND_NAME = "email-on-call";
+const DEPLOY_ENVIRONMENT_ARGUMENT_PATTERN = /^deploy-environment:(prod|staging)$/i;
 const COMMUNICATION_PROVIDER_ARGUMENT_PATTERN = buildProviderArgumentPattern(
   "communication-provider",
   Object.values(COMMUNICATION_PROVIDERS),
@@ -289,6 +290,14 @@ class ConfigCommand extends BaseCalypsoCommand {
       return this.buildParsedCommand({
         action: "config_deploy_provider",
         deployProvider: deployProviderMatch[1].toLowerCase(),
+      });
+    }
+
+    const deployEnvironmentMatch = argument.match(DEPLOY_ENVIRONMENT_ARGUMENT_PATTERN);
+    if (deployEnvironmentMatch) {
+      return this.buildParsedCommand({
+        action: "config_deploy_environment",
+        deployEnvironment: deployEnvironmentMatch[1].toLowerCase(),
       });
     }
 
@@ -666,6 +675,17 @@ class ConfigCommand extends BaseCalypsoCommand {
       );
     }
 
+    if (parsedCommand.action === "config_deploy_environment") {
+      await runtime.setConfiguredDeployEnvironmentFn(
+        runtime.pool,
+        parsedCommand.deployEnvironment,
+        runtime.userId,
+      );
+      return this.buildExecutionResult(
+        `Updated default deploy environment to \`${parsedCommand.deployEnvironment}\`.`,
+      );
+    }
+
     if (parsedCommand.action === "config_email_provider") {
       const unavailableMessage = buildProviderUnavailableMessage(parsedCommand.emailProvider);
       if (unavailableMessage) {
@@ -776,6 +796,7 @@ function isWorkspaceScopedConfigAction(action) {
     action === "config_communication_provider" ||
     action === "config_code_host_provider" ||
     action === "config_deploy_provider" ||
+    action === "config_deploy_environment" ||
     action === "config_email_provider" ||
     action === "config_ai_provider" ||
     action === "config_error_tracking_provider"
@@ -819,6 +840,7 @@ function buildConfigUsageMessage() {
     "`/calypso config communication-provider:slack|microsoft_teams`",
     "`/calypso config code-host-provider:github|bitbucket`",
     "`/calypso config deploy-provider:digitalocean|aws`",
+    "`/calypso config deploy-environment:prod|staging`",
     "`/calypso config email-provider:gmail|outlook`",
     "`/calypso config ai-provider:openai|anthropic`",
     "`/calypso config error-tracking-provider:sentry|rollbar`",

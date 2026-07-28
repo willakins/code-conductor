@@ -39,8 +39,9 @@ test("handleCalypsoCommand returns deploy topic help for testing alias", () => {
   assert.match(result.responseText, /\*Calypso Deploy Help\*/);
   assert.match(result.responseText, /\/calypso status/);
   assert.match(result.responseText, /\/calypso tested <PR_NUMBER>/);
-  assert.match(result.responseText, /\/calypso must-test <PR_NUMBER>/);
-  assert.match(result.responseText, /\/calypso deploy prod force/);
+  assert.match(result.responseText, /\/calypso deploy list/);
+  assert.match(result.responseText, /\/calypso config deploy-environment:prod\|staging/);
+  assert.doesNotMatch(result.responseText, /force/);
 });
 
 test("handleCalypsoCommand returns reviews topic help for reviewing alias", () => {
@@ -230,19 +231,28 @@ test("handleCalypsoCommand routes deploy staging input", () => {
   assert.equal(result.deployEnvironment, "staging");
 });
 
-test("handleCalypsoCommand routes deploy prod force input", () => {
-  const result = handleCalypsoCommand({ text: "deploy prod force", user_id: "U123" });
+test("handleCalypsoCommand routes deploy without an environment", () => {
+  const result = handleCalypsoCommand({ text: "deploy", user_id: "U123" });
 
-  assert.equal(result.action, "deploy_prod");
-  assert.equal(result.forceDeployment, true);
+  assert.equal(result.action, "deploy_default");
+  assert.equal(result.deployEnvironment, null);
+});
+
+test("handleCalypsoCommand routes deploy list as a status alias", () => {
+  const result = handleCalypsoCommand({ text: "deploy list", user_id: "U123" });
+
+  assert.equal(result.commandName, "status");
+  assert.equal(result.action, "status");
 });
 
 test("handleCalypsoCommand rejects invalid deploy input", () => {
-  const result = handleCalypsoCommand({ text: "deploy", user_id: "U123" });
+  const result = handleCalypsoCommand({ text: "deploy prod force", user_id: "U123" });
 
   assert.equal(result.action, "respond");
+  assert.match(result.responseText, /`\/calypso deploy`/);
   assert.match(result.responseText, /`\/calypso deploy staging`/);
-  assert.match(result.responseText, /`\/calypso deploy prod force`/);
+  assert.match(result.responseText, /`\/calypso deploy list`/);
+  assert.doesNotMatch(result.responseText, /force/);
 });
 
 test("handleCalypsoCommand routes whitelist command with mention", () => {
@@ -449,6 +459,16 @@ test("handleCalypsoCommand routes config deploy provider input", () => {
 
   assert.equal(result.action, "config_deploy_provider");
   assert.equal(result.deployProvider, "digitalocean");
+});
+
+test("handleCalypsoCommand routes config default deploy environment input", () => {
+  const result = handleCalypsoCommand({
+    text: "config deploy-environment:staging",
+    user_id: "U123",
+  });
+
+  assert.equal(result.action, "config_deploy_environment");
+  assert.equal(result.deployEnvironment, "staging");
 });
 
 test("handleCalypsoCommand returns unknown message for unsupported input", () => {
@@ -1347,69 +1367,7 @@ test("registerCalypsoCommand denies deploy for non-admin, non-whitelisted user",
   assert.match(payload.text, /Only workspace admins or whitelisted users can deploy/);
 });
 
-test("registerCalypsoCommand force deploy bypasses blockers", async () => {
-  let commandHandler;
-  const queryCalls = [];
-
-  const app = {
-    command(_name, handler) {
-      commandHandler = handler;
-    },
-  };
-
-  const pool = {
-    async query(sql) {
-      queryCalls.push(sql);
-      return { rows: [] };
-    },
-  };
-
-  registerCalypsoCommand(app, {
-    pool,
-    resolveDeployAccessFn: async () => ({ canDeploy: true }),
-    getLastProdDeployAtFn: async () => "1970-01-01T00:00:00.000Z",
-    listBlockingPullRequestsFn: async () => [{ repo: "croft-eng/croft", pr_number: 12, status: "untested" }],
-    listDeployablePullRequestsForDeploymentFn: async () => [
-      {
-        repo: "croft-eng/croft",
-        pr_number: 12,
-        title: "Hotfix without tested",
-        url: "https://github.com/croft-eng/croft/pull/12",
-        author_login: "octocat",
-      },
-    ],
-    triggerProdDeployFn: async () => ({ externalDeployId: "dep-123" }),
-    waitForProdDeployCompletionFn: async () => new Promise(() => {}),
-    listGithubSlackUserMappingsFn: async () => new Map(),
-    deployConfig: {
-      digitaloceanToken: "token",
-      doAppIdProd: "app-id",
-    },
-  });
-
-  let payload;
-  await commandHandler({
-    command: { text: "deploy prod force", user_id: "U123", user_name: "travis" },
-    ack: async () => {},
-    respond: async (message) => {
-      payload = message;
-    },
-  });
-
-  assert.equal(payload.response_type, "in_channel");
-  assert.match(payload.text, /Force deploy to prod is in progress/);
-  assert.match(payload.text, /Triggered by <@U123>/);
-  assert.match(payload.text, /Bypassed 1 blocking PR\(s\)/);
-  assert.doesNotMatch(payload.text, /Marked 1 PR\(s\) deployed/);
-  assert.match(payload.text, /PRs to deploy:/);
-  assert.match(
-    payload.text,
-    /<https:\/\/github\.com\/croft-eng\/croft\/pull\/12\|Hotfix without tested> by octocat \(github username since no matching slack username\)\./,
-  );
-  assert.deepEqual(queryCalls, []);
-});
-
-test("registerCalypsoCommand blocks force deploy when must-test blockers exist", async () => {
+test("registerCalypsoCommand rejects removed force deploy syntax", async () => {
   let commandHandler;
   let deployTriggered = false;
 
@@ -1422,29 +1380,14 @@ test("registerCalypsoCommand blocks force deploy when must-test blockers exist",
   registerCalypsoCommand(app, {
     pool: {},
     resolveDeployAccessFn: async () => ({ canDeploy: true }),
-    getLastProdDeployAtFn: async () => "1970-01-01T00:00:00.000Z",
-    listBlockingPullRequestsFn: async () => [
-      {
-        repo: "croft-eng/croft",
-        pr_number: 12,
-        url: "https://github.com/croft-eng/croft/pull/12",
-        status: "untested",
-        force_deploy_blocked: true,
-      },
-    ],
     triggerProdDeployFn: async () => {
       deployTriggered = true;
-      return { externalDeployId: "dep-123" };
-    },
-    deployConfig: {
-      digitaloceanToken: "token",
-      doAppIdProd: "app-id",
     },
   });
 
   let payload;
   await commandHandler({
-    command: { text: "deploy prod force", user_id: "U123" },
+    command: { text: "deploy prod force", user_id: "U123", user_name: "travis" },
     ack: async () => {},
     respond: async (message) => {
       payload = message;
@@ -1452,10 +1395,8 @@ test("registerCalypsoCommand blocks force deploy when must-test blockers exist",
   });
 
   assert.equal(payload.response_type, "ephemeral");
-  assert.match(payload.text, /Force deploy blocked/);
-  assert.match(payload.text, /must-test and cannot be bypassed/);
-  assert.match(payload.text, /<https:\/\/github.com\/croft-eng\/croft\/pull\/12\|croft-eng\/croft#12> \(untested\)/);
-  assert.match(payload.text, /\/calypso must-test off <PR_NUMBER>/);
+  assert.match(payload.text, /Usage:/);
+  assert.doesNotMatch(payload.text, /force/);
   assert.equal(deployTriggered, false);
 });
 
@@ -1505,6 +1446,74 @@ test("registerCalypsoCommand triggers staging deploy without deploy-gate transac
   assert.deepEqual(queryCalls, []);
   assert.equal(capturedDeployConfiguration.deployTargetEnvironment, "staging");
   assert.equal(capturedDeployConfiguration.deployProductionAppId, "app-id-staging");
+});
+
+test("registerCalypsoCommand deploy uses the configured default environment", async () => {
+  let commandHandler;
+  let capturedDeployConfiguration;
+  const app = {
+    command(_name, handler) {
+      commandHandler = handler;
+    },
+  };
+
+  registerCalypsoCommand(app, {
+    pool: {},
+    resolveDeployAccessFn: async () => ({ canDeploy: true }),
+    getRuntimeProviderConfigFn: async () => ({ deployEnvironment: "staging" }),
+    triggerProdDeployFn: async (deployConfiguration) => {
+      capturedDeployConfiguration = deployConfiguration;
+      return { externalDeployId: null };
+    },
+    deployConfig: {
+      digitaloceanToken: "token",
+      deployStagingAppId: "app-id-staging",
+    },
+  });
+
+  let payload;
+  await commandHandler({
+    command: { text: "deploy", user_id: "U123" },
+    ack: async () => {},
+    respond: async (message) => {
+      payload = message;
+    },
+  });
+
+  assert.equal(payload.response_type, "in_channel");
+  assert.match(payload.text, /Deploy to staging is in progress/);
+  assert.equal(capturedDeployConfiguration.deployTargetEnvironment, "staging");
+  assert.equal(capturedDeployConfiguration.deployProductionAppId, "app-id-staging");
+});
+
+test("registerCalypsoCommand deploy list returns the status response", async () => {
+  let commandHandler;
+  const app = {
+    command(_name, handler) {
+      commandHandler = handler;
+    },
+  };
+
+  registerCalypsoCommand(app, {
+    pool: {},
+    getLastProdDeployAtFn: async () => "2026-07-01T12:00:00.000Z",
+    listBlockingPullRequestsFn: async () => [],
+    readTimeFormatPreferenceFn: async () => "long",
+    readTimeZonePreferenceFn: async () => "UTC",
+    formatStatusResponseFn: () => "status alias result",
+  });
+
+  let payload;
+  await commandHandler({
+    command: { text: "deploy list", user_id: "U123" },
+    ack: async () => {},
+    respond: async (message) => {
+      payload = message;
+    },
+  });
+
+  assert.equal(payload.response_type, "ephemeral");
+  assert.equal(payload.text, "status alias result");
 });
 
 test("registerCalypsoCommand sends staging deployment completion follow-up with staging config", async () => {
@@ -1568,6 +1577,7 @@ test("registerCalypsoCommand sends deployment completion follow-up when enabled"
     {
       repo: "croft-eng/croft",
       pr_number: 12,
+      status: "tested",
       title: "Add deploy gate",
       url: "https://github.com/croft-eng/croft/pull/12",
       author_login: "octocat",
@@ -1575,6 +1585,7 @@ test("registerCalypsoCommand sends deployment completion follow-up when enabled"
     {
       repo: "croft-eng/croft",
       pr_number: 13,
+      status: "tested",
       title: "Fix flaky test",
       url: "https://github.com/croft-eng/croft/pull/13",
       author_login: "hubot",
@@ -1648,6 +1659,7 @@ test("registerCalypsoCommand sends deployment completion follow-up when enabled"
   assert.equal(responses[0].response_type, "in_channel");
   assert.match(responses[0].text, /Deploy to prod is in progress \(id: dep-abc\)/);
   assert.match(responses[0].text, /PRs to deploy:/);
+  assert.match(responses[0].text, /Add deploy gate> by <@U123ABC> \(tested\)\./);
   assert.doesNotMatch(responses[0].text, /Marked 2 PR\(s\) deployed/);
   assert.equal(responses[1].response_type, "in_channel");
   assert.match(
@@ -1656,11 +1668,17 @@ test("registerCalypsoCommand sends deployment completion follow-up when enabled"
   );
   assert.match(responses[1].text, /Marked 2 PR\(s\) deployed/);
   assert.match(responses[1].text, /Deployed PRs:/);
-  assert.match(responses[1].text, /<https:\/\/github\.com\/croft-eng\/croft\/pull\/12\|Add deploy gate> by <@U123ABC>\./);
+  assert.match(responses[1].text, /<https:\/\/github\.com\/croft-eng\/croft\/pull\/12\|Add deploy gate> by <@U123ABC> \(tested\)\./);
   assert.deepEqual(queryCalls, ["BEGIN", "COMMIT"]);
   assert.equal(insertedDeployment.externalDeployId, "dep-abc");
   assert.ok(insertedDeployment.deployedAt instanceof Date);
-  assert.deepEqual(markedPullRequests, deployedPullRequests);
+  assert.deepEqual(
+    markedPullRequests,
+    deployedPullRequests.map(({ status: _status, ...pullRequest }) => ({
+      ...pullRequest,
+      tested: true,
+    })),
+  );
   assert.equal(markedDeployedAt, insertedDeployment.deployedAt);
   assert.equal(insertedWithClient, transactionClient);
   assert.equal(markedWithClient, transactionClient);
@@ -3242,6 +3260,40 @@ test("registerCalypsoCommand config command updates deploy provider", async () =
   assert.equal(capturedCalls.length, 1);
   assert.equal(capturedCalls[0].provider, "digitalocean");
   assert.equal(capturedCalls[0].updatedBy, "UADMIN");
+});
+
+test("registerCalypsoCommand config command updates default deploy environment", async () => {
+  let commandHandler;
+  const capturedCalls = [];
+  const app = {
+    command(_name, handler) {
+      commandHandler = handler;
+    },
+  };
+
+  registerCalypsoCommand(app, {
+    pool: {},
+    resolveDeployAccessFn: async () => ({ canDeploy: true }),
+    setConfiguredDeployEnvironmentFn: async (pool, environment, updatedBy) => {
+      capturedCalls.push({ pool, environment, updatedBy });
+      return { deploy_environment: environment, updated_by: updatedBy };
+    },
+  });
+
+  let payload;
+  await commandHandler({
+    command: { text: "config deploy-environment:staging", user_id: "UADMIN" },
+    ack: async () => {},
+    respond: async (message) => {
+      payload = message;
+    },
+  });
+
+  assert.equal(payload.response_type, "in_channel");
+  assert.match(payload.text, /Updated default deploy environment to `staging`/);
+  assert.deepEqual(capturedCalls, [
+    { pool: {}, environment: "staging", updatedBy: "UADMIN" },
+  ]);
 });
 
 test("registerCalypsoCommand config command updates microsoft teams provider", async () => {

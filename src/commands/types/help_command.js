@@ -48,7 +48,7 @@ function buildOverviewHelpText(botName) {
     "",
     "*Start Here*",
     "`/calypso status` Show deploy blockers.",
-    "`/calypso deploy prod` Attempt a production deploy.",
+    "`/calypso deploy` Deploy to the configured default environment.",
     "`/calypso reviews` Show PRs waiting on review.",
     "`/calypso errors` Show tracked unresolved errors.",
     "`/calypso emails` Show pending support emails.",
@@ -70,11 +70,11 @@ function buildDeployHelpText(botName) {
     "`/calypso tested <PR_NUMBER>` Mark one PR as tested.",
     "`/calypso tested all` Mark all untested PRs as tested.",
     "`/calypso tested recent <day|week|month>` List recently tested PRs.",
-    "`/calypso must-test <PR_NUMBER>` Require testing before force deploy.",
-    "`/calypso must-test off <PR_NUMBER>` Remove force-deploy test requirement.",
+    "`/calypso deploy` Deploy to the configured default environment.",
+    "`/calypso deploy list` Show blockers since last prod deploy.",
     "`/calypso deploy staging` Trigger staging deploy.",
     "`/calypso deploy prod` Attempt prod deploy after gate check.",
-    "`/calypso deploy prod force` Force deploy and bypass blockers.",
+    "`/calypso config deploy-environment:prod|staging` Set the default environment.",
     "`/calypso whitelist <@USER>` Allow deploy/test updates for a user.",
   ].join("\n");
 }
