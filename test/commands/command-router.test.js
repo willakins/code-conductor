@@ -530,6 +530,8 @@ test("registerCalypsoCommand registers /calypso and responds ephemerally", async
   assert.match(payload.text, /\/calypso status/);
   assert.match(payload.text, /Modules/);
   assert.match(payload.text, /\/calypso help monitoring/);
+  assert.match(payload.blocks[0].text.text, /Calypso help/);
+  assert.ok(payload.blocks.some((block) => block.type === "divider"));
 });
 
 test("registerCalypsoCommand runs sync command and returns summary", async () => {
@@ -695,6 +697,55 @@ test("registerCalypsoCommand handles status with injected db functions", async (
   assert.equal(payload.response_type, "ephemeral");
   assert.match(payload.text, /No blockers since last prod deploy/);
   assert.match(payload.text, /2026-02-13 22:00:17 UTC/);
+});
+
+test("registerCalypsoCommand status reports a production red channel topic", async () => {
+  let commandHandler;
+  const app = {
+    command(_name, handler) {
+      commandHandler = handler;
+    },
+  };
+  registerCalypsoCommand(app, {
+    pool: {},
+    getLastProdDeployAtFn: async () => "2026-07-28T16:35:00.000Z",
+    listBlockingPullRequestsFn: async () => [],
+    readTimeFormatPreferenceFn: async () => "long",
+  });
+
+  let payload;
+  await commandHandler({
+    command: {
+      text: "status",
+      user_id: "U123",
+      channel_id: "CDEPLOY",
+    },
+    client: {
+      conversations: {
+        info: async () => ({
+          channel: {
+            topic: {
+              value:
+                "set the channel topic: Production: :red_circle: (Test) On Call/Support: Isaiah Week of July 26-August 1st.",
+            },
+          },
+        }),
+      },
+    },
+    ack: async () => {},
+    respond: async (message) => {
+      payload = message;
+    },
+  });
+
+  assert.match(payload.text, /Production deployment is blocked by the channel topic/);
+  assert.match(payload.text, /No untested PR blockers since last prod deploy/);
+  assert.match(payload.blocks[0].text.text, /Production deploy is blocked/);
+  const renderedBlocks = JSON.stringify(payload.blocks);
+  assert.match(renderedBlocks, /Channel topic/);
+  assert.match(renderedBlocks, /Blocked/);
+  assert.match(renderedBlocks, /Blocking PRs/);
+  assert.match(renderedBlocks, /Change the channel's Production topic marker from red/);
 });
 
 test("registerCalypsoCommand shows open waiting reviews without filters", async () => {

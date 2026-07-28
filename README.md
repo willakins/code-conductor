@@ -963,6 +963,8 @@ Rules:
 - If no deployments exist, baseline is epoch (`1970-01-01T00:00:00.000Z`).
 - Uses a scannable rich message with the gate state, blocker count, last production deploy,
   and a separate linked list of PRs that still need testing.
+- Reports the production channel-topic marker independently from PR blockers. A red production
+  marker makes the overall status blocked even when no PRs need testing.
 
 `/calypso reviews [<GITHUB_USER>] [<day|week|month>]`
 
@@ -1050,6 +1052,8 @@ Rules:
 - If the follow-up detects that the deployment failed or timed out, Calypso tags `@here` in Slack.
 - Deployment blocked, started, completed, and failed messages use Slack Block Kit or a
   Microsoft Teams Adaptive Card, with plain text retained as a fallback.
+- All other command responses use the same rich-message system with command-specific headers,
+  outcome-aware status styling, and provider-safe content sections.
 
 `/calypso deploy staging`
 

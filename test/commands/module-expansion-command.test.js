@@ -146,6 +146,7 @@ test("registerCalypsoCommand emails command lists pending support emails", async
   assert.equal(payload.response_type, "ephemeral");
   assert.match(payload.text, /Pending customer support emails:/);
   assert.match(payload.text, /\[42\] alice@example.com \| Billing question/);
+  assert.match(payload.blocks[0].text.text, /Support email/);
 });
 
 test("registerCalypsoCommand emails command marks support email responded", async () => {
