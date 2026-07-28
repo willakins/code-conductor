@@ -100,6 +100,31 @@ function buildSlackBlocks(presentation) {
     });
   }
 
+  if (presentation.actions.length > 0) {
+    blocks.push({
+      type: "actions",
+      elements: presentation.actions.slice(0, 5).map((action) => ({
+        type: "button",
+        action_id: `calypso:${action.id}`.slice(0, 255),
+        text: { type: "plain_text", text: action.label.slice(0, 75), emoji: true },
+        ...(action.url ? { url: action.url } : { value: action.command }),
+        ...(action.style === "primary" || action.style === "danger"
+          ? { style: action.style }
+          : {}),
+        ...(action.confirm
+          ? {
+              confirm: {
+                title: { type: "plain_text", text: "Confirm action" },
+                text: { type: "mrkdwn", text: action.confirm },
+                confirm: { type: "plain_text", text: "Continue" },
+                deny: { type: "plain_text", text: "Cancel" },
+              },
+            }
+          : {}),
+      })),
+    });
+  }
+
   if (presentation.context) {
     blocks.push({
       type: "context",
@@ -177,6 +202,25 @@ function buildTeamsAdaptiveCard(presentation) {
           spacing: "Small",
         })),
       ].filter(Boolean),
+    });
+  }
+
+  if (presentation.actions.length > 0) {
+    body.push({
+      type: "ActionSet",
+      separator: true,
+      actions: presentation.actions.slice(0, 5).map((action) =>
+        action.url
+          ? {
+              type: "Action.OpenUrl",
+              title: action.label,
+              url: action.url,
+            }
+          : {
+              type: "Action.Submit",
+              title: action.label,
+              data: { command: action.command },
+            }),
     });
   }
 
@@ -259,6 +303,16 @@ function normalizePresentation(presentation) {
         value: normalizeText(fact?.value),
       }))
       .filter((fact) => fact.label && fact.value),
+    actions: (Array.isArray(presentation.actions) ? presentation.actions : [])
+      .map((action, index) => ({
+        command: normalizeText(action?.command),
+        confirm: normalizeText(action?.confirm),
+        id: normalizeText(action?.id) || `action_${index}`,
+        label: normalizeText(action?.label),
+        style: normalizeText(action?.style),
+        url: normalizeText(action?.url),
+      }))
+      .filter((action) => action.label && (action.command || action.url)),
     sections: (Array.isArray(presentation.sections) ? presentation.sections : [])
       .map((section) => ({
         title: normalizeText(section?.title),

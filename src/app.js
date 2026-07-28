@@ -31,6 +31,7 @@ const { createEmailPlatform } = require("./platform/email/factory");
 const { createErrorTrackingPlatform } = require("./platform/error_tracking/factory");
 const { createAiPlatform } = require("./platform/ai/factory");
 const { startReviewRecapScheduler } = require("./background_jobs/review_recap_scheduler");
+const { createDoctorDiagnosticsFn } = require("./commands/services/doctor_diagnostics");
 
 async function start() {
   const runtime = await loadRuntime();
@@ -108,6 +109,7 @@ function wireCommunicationCommands(runtime) {
   runtime.communicationPlatform.registerCalypsoCommand({
     botName: runtime.config.botName,
     enableDeploymentCompletionNotifications: true,
+    enableGateControl: true,
     getRuntimeProviderConfigFn: getRuntimeProviderConfig,
     communicationProvider: runtime.config.communicationProvider,
     errorTrackingProvider: runtime.config.errorTrackingProvider,
@@ -125,6 +127,7 @@ function wireCommunicationCommands(runtime) {
     resolveUserDisplayNameFn: async (_communicationClient, userId) =>
       runtime.communicationPlatform.resolveUserDisplayName(userId),
     runOpenPullRequestSyncNowFn: buildRunOpenPullRequestSyncNow(runtime),
+    runDoctorDiagnosticsFn: createDoctorDiagnosticsFn(runtime),
   });
 }
 

@@ -82,6 +82,21 @@ class EmailsCommand extends BaseCalypsoCommand {
           "Pending customer support emails:",
           ...emailThreads.map(formatPendingSupportEmailLine),
         ].join("\n"),
+        {
+          presentation: {
+            tone: "neutral",
+            title: "Support email queue",
+            summary: `${emailThreads.length} customer thread(s) are waiting for a response.`,
+            sections: [{
+              title: "Queue",
+              items: emailThreads.map((thread) => ({
+                title: `[${thread.id}] ${thread.subject || "(no subject)"}`,
+                description: `From ${thread.first_sender || "unknown sender"}`,
+              })),
+            }],
+            actions: [{ id: "refresh_emails", label: "Refresh", command: "emails" }],
+          },
+        },
       );
     }
 

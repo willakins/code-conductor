@@ -3,9 +3,12 @@ const MAX_SECTION_TEXT_LENGTH = 2800;
 const COMMAND_TITLES = {
   config: "Calypso configuration",
   deploy: "Calypso deployment",
+  doctor: "Calypso diagnostics",
   emails: "Support email",
   errors: "Error tracking",
   help: "Calypso help",
+  gate: "Deployment gate",
+  history: "Calypso activity",
   "must-test": "Force-deploy protection",
   reviews: "Pull request reviews",
   status: "Production deploy status",
@@ -24,7 +27,27 @@ function buildDefaultCommandPresentation({ commandName, responseText }) {
     title: COMMAND_TITLES[commandName] || COMMAND_TITLES.unknown,
     summary,
     sections: sections.map((text) => ({ text })),
+    actions: buildDefaultActions(commandName),
   };
+}
+
+function buildDefaultActions(commandName) {
+  const actionsByCommand = {
+    config: [{ id: "config_help", label: "Configuration help", command: "help config" }],
+    deploy: [{ id: "deploy_status", label: "View status", command: "status" }],
+    doctor: [{ id: "rerun_doctor", label: "Run again", command: "doctor" }],
+    emails: [{ id: "refresh_emails", label: "Refresh queue", command: "emails" }],
+    errors: [{ id: "refresh_errors", label: "Refresh errors", command: "errors" }],
+    gate: [{ id: "gate_status", label: "Gate status", command: "gate status prod" }],
+    history: [{ id: "refresh_history", label: "Refresh history", command: "history" }],
+    "must-test": [{ id: "must_test_status", label: "View status", command: "status" }],
+    reviews: [{ id: "refresh_reviews", label: "Refresh reviews", command: "reviews" }],
+    status: [{ id: "refresh_status", label: "Refresh status", command: "status" }],
+    sync: [{ id: "view_reviews", label: "View reviews", command: "reviews" }],
+    tested: [{ id: "tested_status", label: "View status", command: "status" }],
+    whitelist: [{ id: "deploy_help", label: "Deploy help", command: "help deploy" }],
+  };
+  return actionsByCommand[commandName] || [];
 }
 
 function splitResponseContent(responseText) {

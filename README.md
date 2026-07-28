@@ -959,12 +959,43 @@ Rules:
 
 `/calypso status`
 
-- Shows blockers since last production deployment.
+- Shows the single gate decision used by both status and deploy, including explicit gate state,
+  fallback channel-topic state, untested PRs, and an active deployment run.
 - If no deployments exist, baseline is epoch (`1970-01-01T00:00:00.000Z`).
 - Uses a scannable rich message with the gate state, blocker count, last production deploy,
   and a separate linked list of PRs that still need testing.
 - Reports the production channel-topic marker independently from PR blockers. A red production
-  marker makes the overall status blocked even when no PRs need testing.
+  marker makes the overall status blocked when no explicit gate state has been set.
+- Once `/calypso gate open|close` is used, that persisted state is authoritative and the channel
+  topic remains a backward-compatible fallback only.
+- Includes actions to refresh status, inspect history, or confirm a production deployment when ready.
+
+`/calypso gate status [prod|staging]`
+
+- Shows whether an environment uses an explicit gate or the channel-topic fallback.
+
+`/calypso gate close <prod|staging> <REASON>`
+
+- Restricted to workspace admins and deploy-whitelisted users.
+- Persists an authoritative closed gate with actor, reason, and timestamp.
+- Posts the meaningful gate transition in-channel and records it in audit history.
+- In Slack, updates the current channel's environment marker when topic-write access is available;
+  persistence remains authoritative if topic mirroring fails.
+
+`/calypso gate open <prod|staging>`
+
+- Reopens the authoritative environment gate and records the actor and timestamp.
+
+`/calypso history [prod|staging]`
+
+- Shows the 20 most recent gate, testing, and deployment lifecycle events.
+
+`/calypso doctor`
+
+- Restricted to workspace admins and deploy-whitelisted users.
+- Checks database connectivity, communication and code-host providers, production deploy
+  configuration, channel-topic access, and background scheduler handles.
+- Reports configuration health without exposing credentials.
 
 `/calypso reviews [<GITHUB_USER>] [<day|week|month>]`
 
@@ -997,6 +1028,8 @@ Rules:
 - Marks the PR as tested.
 - Idempotent when already tested.
 - Returns clear message if PR not found.
+- Records the mutation in audit history. When it clears the final gate condition, Calypso posts
+  an in-channel ready notification with a confirmed Deploy production action.
 
 `/calypso tested all`
 
@@ -1019,7 +1052,8 @@ Rules:
 
 `/calypso deploy`
 
-- Deploys to the configured default environment (`prod` by default).
+- Previews a deployment to the configured default environment (`prod` by default) and issues a
+  user-bound confirmation that expires after 10 minutes.
 - Applies the same access, channel-topic, and production blocker checks as an explicit environment command.
 
 `/calypso deploy list`
@@ -1028,7 +1062,11 @@ Rules:
 
 `/calypso deploy prod`
 
-- Blocks when untested blockers exist.
+- Uses the same unified gate decision as `/calypso status`.
+- Requires a second server-validated confirmation before calling the deploy provider. Confirmations
+  are single-use, expire after 10 minutes, and can only be used by the requesting user on Slack or Teams.
+- Blocks when the explicit/fallback environment gate is closed, untested blockers exist, or
+  another deployment run is active.
 - Access restricted to workspace admins and whitelisted users.
 - Blocks when channel topic marks production as red.
 - If no blockers and DigitalOcean env vars missing, returns "deploy not configured".
@@ -1049,11 +1087,18 @@ Rules:
   - does not write deployment row
   - does not mark PRs deployed
 - After trigger, Calypso sends a follow-up message when the deploy provider finishes the deployment.
+- Calypso atomically reserves one active deployment run per environment before calling the provider,
+  preventing simultaneous deploy commands from triggering duplicate deployments.
+- Reservation, trigger, success, failure, and untracked-provider transitions are recorded in
+  `/calypso history`.
 - If the follow-up detects that the deployment failed or timed out, Calypso tags `@here` in Slack.
 - Deployment blocked, started, completed, and failed messages use Slack Block Kit or a
   Microsoft Teams Adaptive Card, with plain text retained as a fallback.
 - All other command responses use the same rich-message system with command-specific headers,
   outcome-aware status styling, and provider-safe content sections.
+- Status, gate, history, reviews, error tracking, support email, and diagnostics use intentional
+  structured presentations. Supported messages can include Slack buttons or Microsoft Teams
+  Adaptive Card actions routed through the same command authorization checks.
 
 `/calypso deploy staging`
 

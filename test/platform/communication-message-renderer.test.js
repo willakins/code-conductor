@@ -88,3 +88,37 @@ test("communication message renderer summarizes oversized item lists", () => {
   assert.doesNotMatch(renderedMessage, /PR #41/);
   assert.match(renderedMessage, /…and 5 more/);
 });
+
+test("communication message renderer maps actions to Slack and Teams", () => {
+  const presentation = {
+    ...STATUS_PRESENTATION,
+    actions: [{
+      command: "deploy prod",
+      confirm: "Deploy production now?",
+      id: "deploy_prod",
+      label: "Deploy production",
+      style: "primary",
+    }],
+  };
+
+  const slackMessage = buildCommunicationMessage({
+    provider: "slack",
+    presentation,
+    text: "Ready.",
+  });
+  const slackAction = slackMessage.blocks.find((block) => block.type === "actions").elements[0];
+  assert.equal(slackAction.action_id, "calypso:deploy_prod");
+  assert.equal(slackAction.value, "deploy prod");
+  assert.equal(slackAction.style, "primary");
+  assert.match(slackAction.confirm.text.text, /Deploy production now/);
+
+  const teamsMessage = buildCommunicationMessage({
+    provider: "microsoft_teams",
+    presentation,
+    text: "Ready.",
+  });
+  const actionSet = teamsMessage.attachments[0].content.body.find(
+    (block) => block.type === "ActionSet",
+  );
+  assert.deepEqual(actionSet.actions[0].data, { command: "deploy prod" });
+});

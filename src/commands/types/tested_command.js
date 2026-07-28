@@ -6,6 +6,8 @@ const {
   formatReviewListItem,
   formatTimestampByTimeFormat,
 } = require("../../util/format");
+const { readDeployAvailabilityFromTopic } = require("../../shared/deploy_availability");
+const { evaluateDeploymentGate } = require("../../shared/gate_decision");
 
 class TestedCommand extends BaseCalypsoCommand {
   constructor() {
@@ -82,6 +84,9 @@ class TestedCommand extends BaseCalypsoCommand {
     }
 
     if (parsedCommand.action === "tested_all") {
+      const clearedKnownBlocker = runtime.enableGateControl
+        ? await hasProductionPullRequestBlockers(runtime)
+        : false;
       const markedCount = await runtime.markAllUntestedPullRequestsTestedFn(
         runtime.pool,
         runtime.userId,
@@ -91,7 +96,11 @@ class TestedCommand extends BaseCalypsoCommand {
         return this.buildExecutionResult("No untested PRs found.");
       }
 
-      return this.buildExecutionResult(`Marked ${markedCount} untested PR(s) as tested.`);
+      return this.buildTestedMutationResult(
+        `Marked ${markedCount} untested PR(s) as tested.`,
+        runtime,
+        { clearedKnownBlocker, markedCount },
+      );
     }
 
     if (parsedCommand.action === "tested_recent") {
@@ -121,6 +130,9 @@ class TestedCommand extends BaseCalypsoCommand {
       );
     }
 
+    const clearedKnownBlocker = runtime.enableGateControl
+      ? await isProductionPullRequestBlocker(runtime, parsedCommand.prNumber)
+      : false;
     const testedResult = await runtime.markPullRequestTestedFn(
       runtime.pool,
       parsedCommand.prNumber,
@@ -135,8 +147,76 @@ class TestedCommand extends BaseCalypsoCommand {
       return this.buildExecutionResult(`PR #${parsedCommand.prNumber} is already marked tested.`);
     }
 
-    return this.buildExecutionResult(`Marked PR #${parsedCommand.prNumber} as tested.`);
+    return this.buildTestedMutationResult(
+      `Marked PR #${parsedCommand.prNumber} as tested.`,
+      runtime,
+      { clearedKnownBlocker, prNumber: parsedCommand.prNumber },
+    );
   }
+
+  async buildTestedMutationResult(responseText, runtime, metadata) {
+    if (!runtime.enableGateControl) {
+      return this.buildExecutionResult(responseText);
+    }
+    await runtime.insertAuditEventFn(runtime.pool, {
+      actorUserId: runtime.userId,
+      environment: "prod",
+      eventType: "pull_request_tested",
+      metadata,
+      summary: responseText,
+    });
+    const lastDeployAt = await runtime.getLastProdDeployAtFn(runtime.pool);
+    const [blockingPullRequests, explicitGateState, activeDeployment, channelTopic] =
+      await Promise.all([
+        runtime.listBlockingPullRequestsFn(runtime.pool, lastDeployAt),
+        runtime.getDeploymentGateStateFn(runtime.pool, "prod"),
+        runtime.getActiveDeploymentRunFn(runtime.pool, "prod"),
+        runtime.resolveCurrentChannelTopicFn(runtime),
+      ]);
+    const decision = evaluateDeploymentGate({
+      activeDeployment,
+      blockingPullRequests,
+      environment: "prod",
+      explicitGateState,
+      topicAvailability: readDeployAvailabilityFromTopic(channelTopic, "prod"),
+    });
+    const gateBecameReady = metadata.clearedKnownBlocker && decision.allowed;
+    return this.buildExecutionResult(
+      gateBecameReady ? `${responseText} Production is now ready to deploy.` : responseText,
+      {
+        gateBecameReady,
+        presentation: {
+          tone: gateBecameReady ? "success" : "neutral",
+          title: gateBecameReady ? "Production is ready" : "Testing confirmation",
+          summary: responseText,
+          context: gateBecameReady
+            ? "The final blocker cleared. Production can now be deployed."
+            : decision.allowed
+              ? "Production was already ready; no new ready notification was posted."
+              : "Other gate conditions still block production.",
+          actions: gateBecameReady
+            ? [{ id: "deploy_prod", label: "Review deployment", command: "deploy prod", style: "primary" }]
+            : [{ id: "refresh_status", label: "View status", command: "status" }],
+        },
+      },
+    );
+  }
+
+  resolveResponseType({ executionResult }) {
+    return executionResult.gateBecameReady ? "in_channel" : "ephemeral";
+  }
+}
+
+async function hasProductionPullRequestBlockers(runtime) {
+  const lastDeployAt = await runtime.getLastProdDeployAtFn(runtime.pool);
+  const blockers = await runtime.listBlockingPullRequestsFn(runtime.pool, lastDeployAt);
+  return blockers.length > 0;
+}
+
+async function isProductionPullRequestBlocker(runtime, prNumber) {
+  const lastDeployAt = await runtime.getLastProdDeployAtFn(runtime.pool);
+  const blockers = await runtime.listBlockingPullRequestsFn(runtime.pool, lastDeployAt);
+  return blockers.some((pullRequest) => Number(pullRequest.pr_number) === Number(prNumber));
 }
 
 async function resolveTestedByNames(recentlyTestedPullRequests, runtime) {

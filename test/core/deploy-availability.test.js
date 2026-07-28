@@ -3,6 +3,7 @@ const test = require("node:test");
 
 const {
   readDeployAvailabilityFromTopic,
+  updateDeployAvailabilityInTopic,
 } = require("../../src/shared/deploy_availability");
 
 test("readDeployAvailabilityFromTopic finds production red status in a descriptive topic", () => {
@@ -23,5 +24,27 @@ test("readDeployAvailabilityFromTopic returns unknown without a recognized marke
   assert.equal(
     readDeployAvailabilityFromTopic("Production deploy status is discussed elsewhere.", "prod"),
     "unknown",
+  );
+});
+
+test("updateDeployAvailabilityInTopic mirrors explicit state without discarding topic text", () => {
+  const topic =
+    "Production: :red_circle: (Test) On Call/Support: Isaiah Week of July 26-August 1st.";
+
+  assert.equal(
+    updateDeployAvailabilityInTopic(topic, "prod", "open"),
+    "Production: :large_green_circle: (Test) On Call/Support: Isaiah Week of July 26-August 1st.",
+  );
+  assert.equal(
+    updateDeployAvailabilityInTopic("Team deploys", "staging", "closed"),
+    "Team deploys · Staging: :red_circle:",
+  );
+  assert.equal(
+    updateDeployAvailabilityInTopic(
+      "Production: maintenance Staging: :large_green_circle:",
+      "prod",
+      "closed",
+    ),
+    "Production: :red_circle: maintenance Staging: :large_green_circle:",
   );
 });
