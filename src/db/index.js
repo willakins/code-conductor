@@ -465,6 +465,265 @@ async function insertDeployment(pool, deployment) {
   return result.rows[0];
 }
 
+async function getDeploymentGateState(pool, environment) {
+  const result = await pool.query(
+    `
+      SELECT environment, status, reason, changed_by, changed_at
+      FROM deployment_gate_state
+      WHERE environment = $1
+    `,
+    [normalizeDeployEnvironment(environment)],
+  );
+  return result.rows[0] || null;
+}
+
+async function setDeploymentGateState(pool, {
+  actorUserId,
+  environment,
+  reason,
+  status,
+}) {
+  const normalizedEnvironment = normalizeDeployEnvironment(environment);
+  const normalizedStatus = status === "closed" ? "closed" : "open";
+  const normalizedReason = normalizedStatus === "closed"
+    ? String(reason || "").trim() || "Closed without a reason."
+    : null;
+  const result = await pool.query(
+    `
+      INSERT INTO deployment_gate_state (
+        environment, status, reason, changed_by, changed_at
+      )
+      VALUES ($1, $2, $3, $4, NOW())
+      ON CONFLICT (environment) DO UPDATE SET
+        status = EXCLUDED.status,
+        reason = EXCLUDED.reason,
+        changed_by = EXCLUDED.changed_by,
+        changed_at = NOW()
+      RETURNING environment, status, reason, changed_by, changed_at
+    `,
+    [normalizedEnvironment, normalizedStatus, normalizedReason, actorUserId || null],
+  );
+  return result.rows[0];
+}
+
+async function setDeploymentGateStateWithAudit(pool, {
+  actorUserId,
+  environment,
+  reason,
+  status,
+  summary,
+}) {
+  const client = typeof pool.connect === "function" ? await pool.connect() : pool;
+  let transactionStarted = false;
+  try {
+    await client.query("BEGIN");
+    transactionStarted = true;
+    const state = await setDeploymentGateState(client, {
+      actorUserId,
+      environment,
+      reason,
+      status,
+    });
+    const event = await insertAuditEvent(client, {
+      actorUserId,
+      environment: state.environment,
+      eventType: `gate_${state.status}`,
+      metadata: { reason: state.reason },
+      summary,
+    });
+    await client.query("COMMIT");
+    transactionStarted = false;
+    return { event, state };
+  } catch (error) {
+    if (transactionStarted) {
+      await client.query("ROLLBACK");
+    }
+    throw error;
+  } finally {
+    if (client !== pool && typeof client.release === "function") {
+      client.release();
+    }
+  }
+}
+
+async function createDeploymentConfirmation(pool, {
+  environment,
+  requestedBy,
+  token,
+}) {
+  const result = await pool.query(
+    `
+      INSERT INTO deployment_confirmations (
+        token, environment, requested_by, expires_at
+      )
+      VALUES ($1, $2, $3, NOW() + INTERVAL '10 minutes')
+      RETURNING token, environment, requested_by, expires_at
+    `,
+    [token, normalizeDeployEnvironment(environment), requestedBy],
+  );
+  return result.rows[0];
+}
+
+async function consumeDeploymentConfirmation(pool, {
+  environment,
+  requestedBy,
+  token,
+}) {
+  const result = await pool.query(
+    `
+      UPDATE deployment_confirmations
+      SET consumed_at = NOW()
+      WHERE token = $1
+        AND environment = $2
+        AND requested_by = $3
+        AND consumed_at IS NULL
+        AND expires_at > NOW()
+      RETURNING token, environment, requested_by, expires_at, consumed_at
+    `,
+    [token, normalizeDeployEnvironment(environment), requestedBy],
+  );
+  return result.rows[0] || null;
+}
+
+async function insertAuditEvent(pool, {
+  actorUserId,
+  environment,
+  eventType,
+  metadata,
+  summary,
+}) {
+  const result = await pool.query(
+    `
+      INSERT INTO calypso_audit_events (
+        event_type, environment, actor_user_id, summary, metadata
+      )
+      VALUES ($1, $2, $3, $4, $5::jsonb)
+      RETURNING id, event_type, environment, actor_user_id, summary, metadata, created_at
+    `,
+    [
+      String(eventType || "unknown"),
+      environment ? normalizeDeployEnvironment(environment) : null,
+      actorUserId || null,
+      String(summary || ""),
+      JSON.stringify(metadata || {}),
+    ],
+  );
+  return result.rows[0];
+}
+
+async function listAuditEvents(pool, { environment = null, limit = 20 } = {}) {
+  const normalizedLimit = Math.min(Math.max(Number(limit) || 20, 1), 100);
+  const normalizedEnvironment = environment ? normalizeDeployEnvironment(environment) : null;
+  const result = await pool.query(
+    `
+      SELECT id, event_type, environment, actor_user_id, summary, metadata, created_at
+      FROM calypso_audit_events
+      WHERE ($1::text IS NULL OR environment = $1)
+      ORDER BY created_at DESC, id DESC
+      LIMIT $2
+    `,
+    [normalizedEnvironment, normalizedLimit],
+  );
+  return result.rows;
+}
+
+async function reserveDeploymentRun(pool, {
+  actorUserId,
+  environment,
+  provider,
+}) {
+  try {
+    const result = await pool.query(
+      `
+        WITH expired_runs AS (
+          UPDATE deployment_runs
+          SET status = 'failed',
+              failure_message = 'Deployment reservation expired before completion.',
+              completed_at = NOW(),
+              updated_at = NOW()
+          WHERE environment = $1
+            AND status IN ('reserved', 'triggered')
+            AND updated_at < NOW() - INTERVAL '2 hours'
+          RETURNING id
+        )
+        INSERT INTO deployment_runs (
+          environment, provider, status, requested_by
+        )
+        VALUES ($1, $2, 'reserved', $3)
+        RETURNING *
+      `,
+      [normalizeDeployEnvironment(environment), provider || null, actorUserId || null],
+    );
+    return { acquired: true, run: result.rows[0] };
+  } catch (error) {
+    if (error?.code !== "23505") {
+      throw error;
+    }
+    return {
+      acquired: false,
+      run: await getActiveDeploymentRun(pool, environment),
+    };
+  }
+}
+
+async function getActiveDeploymentRun(pool, environment) {
+  const result = await pool.query(
+    `
+      SELECT *
+      FROM deployment_runs
+      WHERE environment = $1
+        AND status IN ('reserved', 'triggered')
+      ORDER BY started_at DESC
+      LIMIT 1
+    `,
+    [normalizeDeployEnvironment(environment)],
+  );
+  return result.rows[0] || null;
+}
+
+async function markDeploymentRunTriggered(pool, runId, {
+  externalDeploymentId,
+  provider,
+}) {
+  const result = await pool.query(
+    `
+      UPDATE deployment_runs
+      SET status = 'triggered',
+          provider = COALESCE($2, provider),
+          external_deploy_id = $3,
+          updated_at = NOW()
+      WHERE id = $1
+      RETURNING *
+    `,
+    [runId, provider || null, externalDeploymentId || null],
+  );
+  return result.rows[0] || null;
+}
+
+async function completeDeploymentRun(pool, runId, {
+  failureMessage = null,
+  status,
+}) {
+  const normalizedStatus = status === "succeeded"
+    ? "succeeded"
+    : status === "untracked"
+      ? "untracked"
+      : "failed";
+  const result = await pool.query(
+    `
+      UPDATE deployment_runs
+      SET status = $2,
+          failure_message = $3,
+          completed_at = NOW(),
+          updated_at = NOW()
+      WHERE id = $1
+      RETURNING *
+    `,
+    [runId, normalizedStatus, failureMessage],
+  );
+  return result.rows[0] || null;
+}
+
 async function markPullRequestsDeployedSince(pool, lastDeployAt, deployedAt) {
   const query = `
     UPDATE pull_requests
@@ -3374,6 +3633,9 @@ function normalizePullRequestReviewState(reviewState) {
 }
 
 module.exports = {
+  completeDeploymentRun,
+  consumeDeploymentConfirmation,
+  createDeploymentConfirmation,
   addUserToDeployWhitelist,
   clearSupportEmailOnCall,
   createPool,
@@ -3392,6 +3654,8 @@ module.exports = {
   SUPPORT_EMAIL_DEFAULTS,
   SUPPORT_EMAIL_THREAD_STATUSES,
   getErrorTrackingConfig,
+  getActiveDeploymentRun,
+  getDeploymentGateState,
   getRuntimeProviderConfig,
   getConfiguredTimeZone,
   getEnvironmentStatusConfig,
@@ -3402,7 +3666,9 @@ module.exports = {
   getSupportEmailThreadById,
   isUserWhitelistedForDeploy,
   cacheSupportEmailThreadMessageText,
+  insertAuditEvent,
   insertDeployment,
+  listAuditEvents,
   insertSupportEmailThread,
   listGithubSlackUserMappings,
   listDeployablePullRequestsForDeployment,
@@ -3419,12 +3685,14 @@ module.exports = {
   markStaleOpenPullRequestsClosed,
   markAllUntestedPullRequestsTested,
   markEnvironmentStatusNotificationSent,
+  markDeploymentRunTriggered,
   markPullRequestsDeployed,
   markReviewRecapSent,
   markPullRequestsDeployedSince,
   markSupportEmailThreadNotificationSent,
   markSupportEmailThreadResponded,
   recordEnvironmentStatusObservation,
+  reserveDeploymentRun,
   updatePullRequestCodexApproval,
   updateErrorTrackingRuntimeState,
   updateEnvironmentStatusRuntimeState,
@@ -3437,6 +3705,8 @@ module.exports = {
   setErrorTrackingEnabled,
   setErrorTrackingEnvironment,
   setErrorTrackingProject,
+  setDeploymentGateState,
+  setDeploymentGateStateWithAudit,
   setEnvironmentStatusChannel,
   setEnvironmentStatusEnabled,
   setEnvironmentStatusUrl,

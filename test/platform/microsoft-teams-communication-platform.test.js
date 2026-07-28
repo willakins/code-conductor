@@ -59,6 +59,34 @@ test("microsoft teams platform registers command route and responds", async () =
   assert.equal(await platform.isWorkspaceAdmin("UNAUTHORIZED"), false);
 });
 
+test("microsoft teams platform accepts Adaptive Card submitted commands", async () => {
+  const platform = new MicrosoftTeamsCommunicationPlatform({
+    config: { botName: "Calypso" },
+  });
+  platform.registerCalypsoCommand({ pool: {} });
+  const routes = [];
+  platform.registerHttpRoutes({
+    post(path, handler) {
+      routes.push({ path, handler });
+    },
+  });
+
+  const response = createResponseRecorder();
+  await routes[0].handler(
+    {
+      body: {
+        from: { id: "U123", name: "Will" },
+        value: { command: "help" },
+      },
+      headers: {},
+    },
+    response,
+  );
+
+  assert.equal(response.statusCode, 200);
+  assert.match(response.payload.text, /\/calypso status/);
+});
+
 test("microsoft teams platform renders status as an adaptive card", async () => {
   const platform = new MicrosoftTeamsCommunicationPlatform({
     config: {

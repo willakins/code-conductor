@@ -1,8 +1,11 @@
+const { randomUUID } = require("node:crypto");
+
 const { BaseCalypsoCommand } = require("./base_command");
 const { formatPullRequestReference } = require("../../util/format");
 const {
   readDeployAvailabilityFromTopic,
 } = require("../../shared/deploy_availability");
+const { evaluateDeploymentGate } = require("../../shared/gate_decision");
 
 class DeployCommand extends BaseCalypsoCommand {
   constructor() {
@@ -18,6 +21,18 @@ class DeployCommand extends BaseCalypsoCommand {
     }
 
     const environmentName = (commandWords[1] || "").toLowerCase();
+    if (
+      commandWords.length === 4
+      && (environmentName === "prod" || environmentName === "staging")
+      && String(commandWords[2] || "").toLowerCase() === "confirm"
+      && String(commandWords[3] || "").trim()
+    ) {
+      return this.buildParsedCommand({
+        action: "deploy_confirm",
+        confirmationToken: commandWords[3],
+        deployEnvironment: environmentName,
+      });
+    }
     if (commandWords.length === 2 && environmentName === "list") {
       return this.buildParsedCommand({
         commandName: "status",
@@ -72,46 +87,51 @@ class DeployCommand extends BaseCalypsoCommand {
 
     const deployEnvironment = await this.resolveDeployEnvironment(parsedCommand, runtime);
     const isProductionDeploy = deployEnvironment === "prod";
-    const channelTopicGuardDecision = await this.evaluateChannelTopicGuard({
-      runtime,
-      deployEnvironment,
-    });
-    if (!channelTopicGuardDecision.isAllowed) {
-      return this.buildExecutionResult(channelTopicGuardDecision.reasonText, {
-        presentation: {
-          tone: "danger",
-          title: `${formatEnvironmentLabel(deployEnvironment)} deployment unavailable`,
-          summary: channelTopicGuardDecision.reasonText,
-          context: "The channel topic currently marks this environment red.",
-        },
-      });
-    }
     let deployGateState = {
       blockingPullRequests: [],
       lastProductionDeploymentAt: null,
     };
-    let blockingPullRequestCount = 0;
-
     if (isProductionDeploy) {
       deployGateState = await this.readDeployGateState(runtime);
-      blockingPullRequestCount = deployGateState.blockingPullRequests.length;
-
-      if (blockingPullRequestCount > 0) {
-        return this.buildExecutionResult(
-          [
-            "Deploy blocked due to untested PRs:",
-            ...deployGateState.blockingPullRequests.map(
-              (pr) =>
-                `• ${formatPullRequestReference({ repo: pr.repo, prNumber: pr.pr_number, url: pr.url })} (${pr.status})`,
-            ),
-          ].join("\n"),
-          {
-            presentation: buildBlockedDeploymentPresentation(
-              deployGateState.blockingPullRequests,
-            ),
-          },
-        );
-      }
+    }
+    const gateDecision = await this.readGateDecision({
+      blockingPullRequests: deployGateState.blockingPullRequests,
+      deployEnvironment,
+      runtime,
+    });
+    if (!gateDecision.allowed) {
+      const onlyPullRequestBlockers = gateDecision.reasons.every(
+        (reason) => reason.code === "untested_pull_requests",
+      );
+      const topicBlocked = gateDecision.reasons.some(
+        (reason) => reason.code === "channel_topic_blocked",
+      );
+      const responseLead = onlyPullRequestBlockers
+        ? "Deploy blocked due to untested PRs:"
+        : topicBlocked
+          ? `Cannot deploy to ${deployEnvironment} from this channel right now.`
+          : `Cannot deploy to ${deployEnvironment}:`;
+      return this.buildExecutionResult(
+        [
+          responseLead,
+          ...gateDecision.reasons.map((reason) =>
+            reason.code === "channel_topic_blocked"
+              ? "• Channel topic indicates deploy is not allowed for that environment (red status)."
+              : `• ${reason.message}`),
+          ...(onlyPullRequestBlockers
+            ? deployGateState.blockingPullRequests.map(
+                (pr) =>
+                  `• ${formatPullRequestReference({ repo: pr.repo, prNumber: pr.pr_number, url: pr.url })} (${pr.status})`,
+              )
+            : []),
+        ].join("\n"),
+        {
+          presentation: buildBlockedDeploymentPresentation(
+            deployGateState.blockingPullRequests,
+            gateDecision,
+          ),
+        },
+      );
     }
 
     const deployConfiguration = this.resolveDeployConfiguration(
@@ -130,19 +150,107 @@ class DeployCommand extends BaseCalypsoCommand {
       });
     }
 
+    if (runtime.enableGateControl && parsedCommand.action !== "deploy_confirm") {
+      const confirmation = await runtime.createDeploymentConfirmationFn(runtime.pool, {
+        environment: deployEnvironment,
+        requestedBy: runtime.userId,
+        token: randomUUID(),
+      });
+      const plannedPullRequests = isProductionDeploy
+        ? (await this.readProductionDeploymentPlan({
+            runtime,
+            lastProductionDeploymentAt: deployGateState.lastProductionDeploymentAt,
+            includeUntested: false,
+          })).plannedPullRequests
+        : [];
+      return this.buildExecutionResult(
+        `${formatEnvironmentLabel(deployEnvironment)} deployment is ready for confirmation.`,
+        {
+          presentation: buildDeploymentConfirmationPresentation({
+            confirmation,
+            deployEnvironment,
+            plannedPullRequests,
+          }),
+        },
+      );
+    }
+
+    if (runtime.enableGateControl) {
+      const confirmation = await runtime.consumeDeploymentConfirmationFn(runtime.pool, {
+        environment: deployEnvironment,
+        requestedBy: runtime.userId,
+        token: parsedCommand.confirmationToken,
+      });
+      if (!confirmation) {
+        return this.buildExecutionResult(
+          "Deployment confirmation is invalid, expired, already used, or belongs to another user. Run the deploy command again.",
+        );
+      }
+    }
+
+    let deploymentRun = null;
+    let deployProvider = deployConfiguration.deployProvider || "digitalocean";
+    let externalDeploymentId = null;
+    let productionDeploymentPlan = null;
+    let providerTriggered = false;
     try {
-      const productionDeploymentPlan = isProductionDeploy
+      productionDeploymentPlan = isProductionDeploy
         ? await this.readProductionDeploymentPlan({
             runtime,
             lastProductionDeploymentAt: deployGateState.lastProductionDeploymentAt,
             includeUntested: false,
           })
         : null;
+      const reservation = runtime.enableGateControl
+        ? await runtime.reserveDeploymentRunFn(runtime.pool, {
+            actorUserId: runtime.userId,
+            environment: deployEnvironment,
+            provider: deployConfiguration.deployProvider,
+          })
+        : { acquired: true, run: { id: null, environment: deployEnvironment } };
+      if (!reservation.acquired) {
+        return this.buildExecutionResult(
+          `Cannot deploy to ${deployEnvironment}: deployment run #${reservation.run?.id || "unknown"} is already active.`,
+        );
+      }
+      deploymentRun = reservation.run;
+      if (runtime.enableGateControl) await runtime.insertAuditEventFn(runtime.pool, {
+        actorUserId: runtime.userId,
+        environment: deployEnvironment,
+        eventType: "deployment_reserved",
+        metadata: { runId: deploymentRun.id },
+        summary: `${formatEnvironmentLabel(deployEnvironment)} deployment run #${deploymentRun.id} reserved.`,
+      });
+
       const deployResult = await runtime.triggerProdDeployFn(deployConfiguration);
-      const deploymentTriggeredBy = await this.resolveDeploymentTriggeredBy(runtime);
-      const deployProvider =
+      providerTriggered = true;
+      deployProvider =
         deployResult.deployProvider || deployConfiguration.deployProvider || "digitalocean";
-      const externalDeploymentId = deployResult.externalDeployId || null;
+      externalDeploymentId = deployResult.externalDeployId || null;
+      const deploymentTriggeredBy = await this.resolveDeploymentTriggeredBy(runtime);
+      if (runtime.enableGateControl) await runtime.markDeploymentRunTriggeredFn(runtime.pool, deploymentRun.id, {
+        externalDeploymentId,
+        provider: deployProvider,
+      });
+      if (runtime.enableGateControl) await runtime.insertAuditEventFn(runtime.pool, {
+        actorUserId: runtime.userId,
+        environment: deployEnvironment,
+        eventType: "deployment_triggered",
+        metadata: { externalDeploymentId, runId: deploymentRun.id },
+        summary: `${formatEnvironmentLabel(deployEnvironment)} deployment run #${deploymentRun.id} triggered.`,
+      });
+      if (runtime.enableGateControl && !externalDeploymentId) {
+        await runtime.completeDeploymentRunFn(runtime.pool, deploymentRun.id, {
+          status: "untracked",
+        });
+        await runtime.insertAuditEventFn(runtime.pool, {
+          actorUserId: runtime.userId,
+          environment: deployEnvironment,
+          eventType: "deployment_untracked",
+          metadata: { runId: deploymentRun.id },
+          summary: `${formatEnvironmentLabel(deployEnvironment)} deployment run #${deploymentRun.id} was accepted without a provider ID; completion cannot be monitored.`,
+        });
+      }
       const deploymentId = externalDeploymentId || "n/a";
       const shouldNotifyDeploymentCompletion =
         runtime.enableDeploymentCompletionNotifications &&
@@ -162,6 +270,7 @@ class DeployCommand extends BaseCalypsoCommand {
         return this.buildExecutionResult(
           `Deploy to staging is in progress (id: ${deploymentId}). Triggered by ${deploymentTriggeredBy}.`,
           this.buildDeploymentExecutionFields({
+            deploymentRunId: deploymentRun.id,
             externalDeploymentId,
             deployProvider,
             shouldNotifyDeploymentCompletion,
@@ -186,11 +295,13 @@ class DeployCommand extends BaseCalypsoCommand {
           plannedPullRequestSummaryText,
         ),
         this.buildDeploymentExecutionFields({
+          deploymentRunId: deploymentRun.id,
           externalDeploymentId,
           deployProvider,
           shouldNotifyDeploymentCompletion,
           deployConfigOverrides: this.buildDeployConfigOverridesForCompletion(deployConfiguration),
           productionDeploymentFinalization: this.buildProductionDeploymentFinalization({
+            deploymentRunId: deploymentRun.id,
             isProductionDeploy,
             externalDeploymentId,
             deployProvider,
@@ -208,6 +319,60 @@ class DeployCommand extends BaseCalypsoCommand {
         }),
       );
     } catch (error) {
+      if (providerTriggered) {
+        return this.buildExecutionResult(
+          [
+            `Deploy to ${deployEnvironment} was accepted by the provider`,
+            externalDeploymentId ? `(id: ${externalDeploymentId}).` : "without a deployment id.",
+            `Calypso hit a post-trigger tracking error: ${error.message}`,
+          ].join(" "),
+          this.buildDeploymentExecutionFields({
+            deploymentRunId: deploymentRun?.id || null,
+            deployConfigOverrides: this.buildDeployConfigOverridesForCompletion(deployConfiguration),
+            deployProvider,
+            externalDeploymentId,
+            productionDeploymentFinalization:
+              isProductionDeploy && externalDeploymentId && productionDeploymentPlan
+                ? this.buildProductionDeploymentFinalization({
+                    deploymentRunId: deploymentRun?.id || null,
+                    deployProvider,
+                    externalDeploymentId,
+                    isProductionDeploy,
+                    productionDeploymentPlan,
+                  })
+                : null,
+            shouldNotifyDeploymentCompletion:
+              runtime.enableDeploymentCompletionNotifications && Boolean(externalDeploymentId),
+            presentation: {
+              tone: "warning",
+              title: `${formatEnvironmentLabel(deployEnvironment)} deployment accepted`,
+              summary: "The provider accepted the deployment, but Calypso could not finish post-trigger bookkeeping.",
+              facts: [
+                { label: "Deployment ID", value: externalDeploymentId || "not returned" },
+                { label: "Run", value: String(deploymentRun?.id || "reserved") },
+              ],
+              context: "Concurrency protection remains active while Calypso monitors or the reservation lease expires.",
+            },
+          }),
+        );
+      }
+      if (runtime.enableGateControl && deploymentRun?.id) {
+        await runtime.completeDeploymentRunFn(runtime.pool, deploymentRun.id, {
+          failureMessage: error.message,
+          status: "failed",
+        });
+        try {
+          await runtime.insertAuditEventFn(runtime.pool, {
+            actorUserId: runtime.userId,
+            environment: deployEnvironment,
+            eventType: "deployment_failed",
+            metadata: { failureMessage: error.message, runId: deploymentRun.id },
+            summary: `${formatEnvironmentLabel(deployEnvironment)} deployment run #${deploymentRun.id} failed before completion: ${error.message}`,
+          });
+        } catch (_auditError) {
+          // Preserve the provider failure as the user-facing error.
+        }
+      }
       return this.buildExecutionResult(
         `Deploy failed before deployment state was committed: ${error.message}`,
         {
@@ -223,6 +388,14 @@ class DeployCommand extends BaseCalypsoCommand {
   }
 
   async readDeployGateState(runtime) {
+    if (!runtime.pool || typeof runtime.pool.query !== "function") {
+      const lastProductionDeploymentAt = await runtime.getLastProdDeployAtFn(runtime.pool);
+      const blockingPullRequests = await runtime.listBlockingPullRequestsFn(
+        runtime.pool,
+        lastProductionDeploymentAt,
+      );
+      return { blockingPullRequests, lastProductionDeploymentAt };
+    }
     const lastProductionDeploymentAt = await runtime.getLastProdDeployAtFn(runtime.pool);
     const blockingPullRequests = await runtime.listBlockingPullRequestsFn(
       runtime.pool,
@@ -280,29 +453,25 @@ class DeployCommand extends BaseCalypsoCommand {
     return "prod";
   }
 
-  async evaluateChannelTopicGuard({ runtime, deployEnvironment }) {
-    const resolveCurrentChannelTopicFn = runtime.resolveCurrentChannelTopicFn;
-    if (typeof resolveCurrentChannelTopicFn !== "function") {
-      return { isAllowed: true };
-    }
-
-    const channelTopic = await resolveCurrentChannelTopicFn(runtime);
-    if (typeof channelTopic !== "string" || channelTopic.trim() === "") {
-      return { isAllowed: true };
-    }
-
-    const topicStatus = readDeployAvailabilityFromTopic(channelTopic, deployEnvironment);
-    if (topicStatus !== "blocked") {
-      return { isAllowed: true };
-    }
-
-    return {
-      isAllowed: false,
-      reasonText: [
-        `Cannot deploy to ${deployEnvironment} from this channel right now.`,
-        "Channel topic indicates deploy is not allowed for that environment (red status).",
-      ].join(" "),
-    };
+  async readGateDecision({ blockingPullRequests, deployEnvironment, runtime }) {
+    const [channelTopic, explicitGateState, activeDeployment] = await Promise.all([
+      typeof runtime.resolveCurrentChannelTopicFn === "function"
+        ? runtime.resolveCurrentChannelTopicFn(runtime)
+        : null,
+      runtime.enableGateControl
+        ? runtime.getDeploymentGateStateFn(runtime.pool, deployEnvironment)
+        : null,
+      runtime.enableGateControl
+        ? runtime.getActiveDeploymentRunFn(runtime.pool, deployEnvironment)
+        : null,
+    ]);
+    return evaluateDeploymentGate({
+      activeDeployment,
+      blockingPullRequests,
+      environment: deployEnvironment,
+      explicitGateState,
+      topicAvailability: readDeployAvailabilityFromTopic(channelTopic, deployEnvironment),
+    });
   }
 
   resolveDeployConfiguration(deployConfig = {}, deployEnvironment = "prod") {
@@ -391,6 +560,7 @@ class DeployCommand extends BaseCalypsoCommand {
   }
 
   buildDeploymentExecutionFields({
+    deploymentRunId,
     externalDeploymentId,
     deployProvider,
     shouldNotifyDeploymentCompletion,
@@ -399,6 +569,7 @@ class DeployCommand extends BaseCalypsoCommand {
     presentation,
   }) {
     return {
+      deploymentRunId,
       deployTriggered: true,
       externalDeploymentId,
       deployProvider: deployProvider || null,
@@ -411,6 +582,7 @@ class DeployCommand extends BaseCalypsoCommand {
   }
 
   buildProductionDeploymentFinalization({
+    deploymentRunId,
     isProductionDeploy,
     externalDeploymentId,
     deployProvider,
@@ -422,6 +594,7 @@ class DeployCommand extends BaseCalypsoCommand {
 
     return {
       externalDeploymentId,
+      deploymentRunId,
       deployProvider,
       deploymentCutoffAt: productionDeploymentPlan.deploymentCutoffAt,
       plannedPullRequests: productionDeploymentPlan.plannedPullRequests,
@@ -429,25 +602,27 @@ class DeployCommand extends BaseCalypsoCommand {
   }
 }
 
-function buildBlockedDeploymentPresentation(blockingPullRequests) {
+function buildBlockedDeploymentPresentation(blockingPullRequests, gateDecision) {
   const blockers = Array.isArray(blockingPullRequests) ? blockingPullRequests : [];
-  const blockerLabel = blockers.length === 1 ? "PR still needs" : "PRs still need";
+  const environmentLabel = formatEnvironmentLabel(gateDecision?.environment);
 
   return {
     tone: "danger",
-    title: "Production deployment blocked",
-    summary: `${blockers.length} ${blockerLabel} testing before production can deploy.`,
+    title: gateDecision.reasons.some((reason) => reason.code === "channel_topic_blocked")
+      ? `${environmentLabel} deployment unavailable`
+      : `${environmentLabel} deployment blocked`,
+    summary: gateDecision.reasons.map((reason) => reason.message).join(" "),
     facts: [
       {
         label: "Environment",
-        value: "Production",
+        value: environmentLabel,
       },
       {
         label: "Blocking PRs",
         value: String(blockers.length),
       },
     ],
-    sections: [
+    sections: blockers.length > 0 ? [
       {
         title: "Needs testing",
         items: blockers.map((pullRequest) => ({
@@ -459,8 +634,12 @@ function buildBlockedDeploymentPresentation(blockingPullRequests) {
           description: `Status: ${String(pullRequest?.status || "untested").toLowerCase()}`,
         })),
       },
+    ] : [],
+    context: "Resolve the listed gate reasons, then refresh status.",
+    actions: [
+      { id: "refresh_status", label: "Refresh status", command: "status" },
+      { id: "view_history", label: "View history", command: `history ${gateDecision.environment}` },
     ],
-    context: "Verify each change, then run `/calypso tested <PR_NUMBER>`.",
   };
 }
 
@@ -516,6 +695,41 @@ function buildDeploymentStartedPresentation({
       : shouldNotifyDeploymentCompletion
         ? "Calypso will post again when the provider reports completion."
         : "The deployment was handed off to the configured provider.",
+  };
+}
+
+function buildDeploymentConfirmationPresentation({
+  confirmation,
+  deployEnvironment,
+  plannedPullRequests,
+}) {
+  const environmentLabel = formatEnvironmentLabel(deployEnvironment);
+  const pullRequests = Array.isArray(plannedPullRequests) ? plannedPullRequests : [];
+  return {
+    tone: "warning",
+    title: `Confirm ${environmentLabel.toLowerCase()} deployment`,
+    summary: `Review this deployment, then confirm within 10 minutes. Only the requesting user can confirm it.`,
+    facts: [
+      { label: "Environment", value: environmentLabel },
+      { label: "PRs planned", value: String(pullRequests.length) },
+    ],
+    sections: pullRequests.length > 0
+      ? [{
+          title: "Planned changes",
+          items: pullRequests.map((pullRequest) => ({
+            title: `${pullRequest.repo}#${pullRequest.pr_number} — ${pullRequest.title || "(untitled)"}`,
+            url: pullRequest.url || "",
+          })),
+        }]
+      : [],
+    actions: [{
+      id: `confirm_${deployEnvironment}`,
+      label: `Confirm ${environmentLabel.toLowerCase()} deploy`,
+      command: `deploy ${deployEnvironment} confirm ${confirmation.token}`,
+      style: "danger",
+      confirm: `Trigger the ${environmentLabel.toLowerCase()} deployment now?`,
+    }],
+    context: `Confirmation expires at ${confirmation.expires_at || "approximately 10 minutes from now"}.`,
   };
 }
 

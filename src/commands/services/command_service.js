@@ -2,9 +2,14 @@ const {
   addUserToDeployWhitelist,
   cacheSupportEmailThreadMessageText,
   clearSupportEmailOnCall,
+  completeDeploymentRun,
+  consumeDeploymentConfirmation,
+  createDeploymentConfirmation,
   DEFAULT_TIME_FORMAT,
   DEFAULT_TIME_ZONE,
   getErrorTrackingConfig,
+  getActiveDeploymentRun,
+  getDeploymentGateState,
   getEnvironmentStatusConfig,
   getConfiguredTimeFormat,
   getConfiguredTimeZone,
@@ -15,6 +20,8 @@ const {
   getSupportEmailConfig,
   isUserWhitelistedForDeploy,
   insertDeployment,
+  insertAuditEvent,
+  listAuditEvents,
   listDeployablePullRequestsForDeployment,
   listGithubSlackUserMappings,
   listPendingSupportEmailThreads,
@@ -23,6 +30,7 @@ const {
   listRecentlyTestedPullRequests,
   listBlockingPullRequests,
   markEnvironmentStatusNotificationSent,
+  markDeploymentRunTriggered,
   markReviewRecapSent,
   markAllUntestedPullRequestsTested,
   markPullRequestTested,
@@ -30,6 +38,7 @@ const {
   markSupportEmailThreadNotificationSent,
   markSupportEmailThreadResponded,
   recordEnvironmentStatusObservation,
+  reserveDeploymentRun,
   setConfiguredTimeFormat,
   setConfiguredTimeZone,
   setConfiguredCommunicationProvider,
@@ -45,6 +54,8 @@ const {
   setErrorTrackingEnabled,
   setErrorTrackingEnvironment,
   setErrorTrackingProject,
+  setDeploymentGateState,
+  setDeploymentGateStateWithAudit,
   setEnvironmentStatusChannel,
   setEnvironmentStatusEnabled,
   setEnvironmentStatusUrl,
@@ -62,6 +73,7 @@ const {
 } = require("../../db");
 const { DEFAULT_BOT_NAME } = require("../../config");
 const { formatStatusResponse, isValidTimeZone } = require("../../util/format");
+const { updateDeployAvailabilityInTopic } = require("../../shared/deploy_availability");
 const { createCalypsoCommandRegistry } = require("../registry/command_registry");
 const {
   buildDeploymentPullRequestSummary: formatDeploymentPullRequestSummary,
@@ -107,6 +119,38 @@ function createCalypsoCommandService(serviceOptions = {}) {
       return finalizeProductionDeployment(runtimeContext, deploymentFinalization);
     },
 
+    async completeDeploymentRun(runId, completion, commandContext = {}) {
+      const runtimeContext = buildRuntimeContext({
+        serviceOptions,
+        commandContext,
+        defaultDependencies,
+      });
+      const completedRun = await runtimeContext.completeDeploymentRunFn(
+        runtimeContext.pool,
+        runId,
+        completion,
+      );
+      await runtimeContext.insertAuditEventFn(runtimeContext.pool, {
+        actorUserId: runtimeContext.userId,
+        environment: completedRun?.environment,
+        eventType: completion.status === "succeeded" ? "deployment_succeeded" : "deployment_failed",
+        metadata: {
+          durationSeconds: calculateDurationSeconds(
+            completedRun?.started_at,
+            completedRun?.completed_at,
+          ),
+          externalDeploymentId: completedRun?.external_deploy_id || null,
+          failureMessage: completion.failureMessage || null,
+          provider: completedRun?.provider || null,
+          runId,
+        },
+        summary: completion.status === "succeeded"
+          ? `${completedRun?.environment || "Deployment"} run #${runId} succeeded.`
+          : `${completedRun?.environment || "Deployment"} run #${runId} failed: ${completion.failureMessage || "Unknown failure."}`,
+      });
+      return completedRun;
+    },
+
     async buildDeploymentPullRequestSummary(summaryOptions, commandContext = {}) {
       const runtimeContext = buildRuntimeContext({
         serviceOptions,
@@ -136,18 +180,29 @@ function createDefaultDependencies() {
   return {
     defaultBotName: DEFAULT_BOT_NAME,
     getErrorTrackingConfigFn: getErrorTrackingConfig,
+    getActiveDeploymentRunFn: (pool, environment) =>
+      hasQueryablePool(pool) ? getActiveDeploymentRun(pool, environment) : null,
+    getDeploymentGateStateFn: (pool, environment) =>
+      hasQueryablePool(pool) ? getDeploymentGateState(pool, environment) : null,
     formatStatusResponseFn: formatStatusResponse,
     addUserToDeployWhitelistFn: addUserToDeployWhitelist,
     cacheSupportEmailThreadMessageTextFn: cacheSupportEmailThreadMessageText,
     clearSupportEmailOnCallFn: clearSupportEmailOnCall,
     getEnvironmentStatusConfigFn: getEnvironmentStatusConfig,
-    getLastProdDeployAtFn: getLastProdDeployAt,
+    getLastProdDeployAtFn: (pool) =>
+      hasQueryablePool(pool) ? getLastProdDeployAt(pool) : new Date(0),
     getConfiguredTimeFormatFn: getConfiguredTimeFormat,
     getConfiguredTimeZoneFn: getConfiguredTimeZone,
     isUserWhitelistedForDeployFn: isUserWhitelistedForDeploy,
     isValidTimeZoneFn: isValidTimeZone,
     isWorkspaceAdminFn: isWorkspaceAdmin,
     insertDeploymentFn: insertDeployment,
+    consumeDeploymentConfirmationFn: consumeDeploymentConfirmation,
+    createDeploymentConfirmationFn: createDeploymentConfirmation,
+    insertAuditEventFn: (pool, event) =>
+      hasQueryablePool(pool) ? insertAuditEvent(pool, event) : event,
+    listAuditEventsFn: (pool, options) =>
+      hasQueryablePool(pool) ? listAuditEvents(pool, options) : [],
     getReviewRecapConfigFn: getReviewRecapConfig,
     getRuntimeProviderConfigFn: getRuntimeProviderConfig,
     getSupportEmailConfigFn: getSupportEmailConfig,
@@ -159,18 +214,26 @@ function createDefaultDependencies() {
     listGithubSlackUserMappingsFn: listGithubSlackUserMappings,
     markReviewRecapSentFn: markReviewRecapSent,
     listRecentlyTestedPullRequestsFn: listRecentlyTestedPullRequests,
-    listBlockingPullRequestsFn: listBlockingPullRequests,
+    listBlockingPullRequestsFn: (pool, lastDeployAt) =>
+      hasQueryablePool(pool) ? listBlockingPullRequests(pool, lastDeployAt) : [],
     markAllUntestedPullRequestsTestedFn: markAllUntestedPullRequestsTested,
     markEnvironmentStatusNotificationSentFn: markEnvironmentStatusNotificationSent,
+    markDeploymentRunTriggeredFn: (pool, runId, update) =>
+      hasQueryablePool(pool) ? markDeploymentRunTriggered(pool, runId, update) : null,
     markPullRequestTestedFn: markPullRequestTested,
     markPullRequestsDeployedFn: markPullRequestsDeployed,
     markSupportEmailThreadNotificationSentFn: markSupportEmailThreadNotificationSent,
     markSupportEmailThreadRespondedFn: markSupportEmailThreadResponded,
     recordEnvironmentStatusObservationFn: recordEnvironmentStatusObservation,
+    reserveDeploymentRunFn: (pool, reservation) =>
+      hasQueryablePool(pool)
+        ? reserveDeploymentRun(pool, reservation)
+        : { acquired: true, run: { id: null, environment: reservation.environment } },
     readTimeFormatPreferenceFn: readTimeFormatPreference,
     readTimeZonePreferenceFn: readTimeZonePreference,
     resolveUserDisplayNameFn: resolveUserDisplayNameFromCommunicationClient,
     resolveCurrentChannelTopicFn: resolveCurrentChannelTopicFromCommunicationClient,
+    updateCurrentChannelTopicFn: updateCurrentChannelTopicFromCommunicationClient,
     resolveDeployAccessFn: resolveDeployAccess,
     resolveAiClientFn: null,
     resolveEmailClientByProviderFn: null,
@@ -190,6 +253,19 @@ function createDefaultDependencies() {
     setErrorTrackingEnabledFn: setErrorTrackingEnabled,
     setErrorTrackingEnvironmentFn: setErrorTrackingEnvironment,
     setErrorTrackingProjectFn: setErrorTrackingProject,
+    setDeploymentGateStateFn: (pool, state) =>
+      hasQueryablePool(pool) ? setDeploymentGateState(pool, state) : state,
+    setDeploymentGateStateWithAuditFn: (pool, change) =>
+      hasQueryablePool(pool)
+        ? setDeploymentGateStateWithAudit(pool, change)
+        : {
+            state: {
+              changed_by: change.actorUserId,
+              environment: change.environment,
+              reason: change.reason || null,
+              status: change.status,
+            },
+          },
     setEnvironmentStatusChannelFn: setEnvironmentStatusChannel,
     setEnvironmentStatusEnabledFn: setEnvironmentStatusEnabled,
     setEnvironmentStatusUrlFn: setEnvironmentStatusUrl,
@@ -204,6 +280,12 @@ function createDefaultDependencies() {
     setSupportEmailMonitorEnabledFn: setSupportEmailMonitorEnabled,
     setSupportEmailOnCallFn: setSupportEmailOnCall,
     triggerProdDeployFn: triggerProductionDeploymentUnavailable,
+    completeDeploymentRunFn: (pool, runId, completion) =>
+      hasQueryablePool(pool) ? completeDeploymentRun(pool, runId, completion) : {
+        id: runId,
+        status: completion.status,
+      },
+    runDoctorDiagnosticsFn: runDefaultDoctorDiagnostics,
     updateSupportEmailRuntimeStateFn: updateSupportEmailRuntimeState,
     waitForProdDeployCompletionFn: waitForProductionDeploymentCompletionUnavailable,
   };
@@ -243,6 +325,10 @@ function buildRuntimeContext({ serviceOptions, commandContext, defaultDependenci
       mergedOptions.formatStatusResponseFn || defaultDependencies.formatStatusResponseFn,
     getErrorTrackingConfigFn:
       mergedOptions.getErrorTrackingConfigFn || defaultDependencies.getErrorTrackingConfigFn,
+    getActiveDeploymentRunFn:
+      mergedOptions.getActiveDeploymentRunFn || defaultDependencies.getActiveDeploymentRunFn,
+    getDeploymentGateStateFn:
+      mergedOptions.getDeploymentGateStateFn || defaultDependencies.getDeploymentGateStateFn,
     getEnvironmentStatusConfigFn:
       mergedOptions.getEnvironmentStatusConfigFn || defaultDependencies.getEnvironmentStatusConfigFn,
     getLastProdDeployAtFn:
@@ -264,6 +350,16 @@ function buildRuntimeContext({ serviceOptions, commandContext, defaultDependenci
     isValidTimeZoneFn: mergedOptions.isValidTimeZoneFn || defaultDependencies.isValidTimeZoneFn,
     isWorkspaceAdminFn: mergedOptions.isWorkspaceAdminFn || defaultDependencies.isWorkspaceAdminFn,
     insertDeploymentFn: mergedOptions.insertDeploymentFn || defaultDependencies.insertDeploymentFn,
+    consumeDeploymentConfirmationFn:
+      mergedOptions.consumeDeploymentConfirmationFn ||
+      defaultDependencies.consumeDeploymentConfirmationFn,
+    createDeploymentConfirmationFn:
+      mergedOptions.createDeploymentConfirmationFn ||
+      defaultDependencies.createDeploymentConfirmationFn,
+    insertAuditEventFn:
+      mergedOptions.insertAuditEventFn || defaultDependencies.insertAuditEventFn,
+    listAuditEventsFn:
+      mergedOptions.listAuditEventsFn || defaultDependencies.listAuditEventsFn,
     listPendingSupportEmailThreadsFn:
       mergedOptions.listPendingSupportEmailThreadsFn ||
       defaultDependencies.listPendingSupportEmailThreadsFn,
@@ -290,6 +386,9 @@ function buildRuntimeContext({ serviceOptions, commandContext, defaultDependenci
     markEnvironmentStatusNotificationSentFn:
       mergedOptions.markEnvironmentStatusNotificationSentFn ||
       defaultDependencies.markEnvironmentStatusNotificationSentFn,
+    markDeploymentRunTriggeredFn:
+      mergedOptions.markDeploymentRunTriggeredFn ||
+      defaultDependencies.markDeploymentRunTriggeredFn,
     markReviewRecapSentFn:
       mergedOptions.markReviewRecapSentFn || defaultDependencies.markReviewRecapSentFn,
     markPullRequestTestedFn:
@@ -307,6 +406,8 @@ function buildRuntimeContext({ serviceOptions, commandContext, defaultDependenci
     recordEnvironmentStatusObservationFn:
       mergedOptions.recordEnvironmentStatusObservationFn ||
       defaultDependencies.recordEnvironmentStatusObservationFn,
+    reserveDeploymentRunFn:
+      mergedOptions.reserveDeploymentRunFn || defaultDependencies.reserveDeploymentRunFn,
     readTimeFormatPreferenceFn:
       mergedOptions.readTimeFormatPreferenceFn || defaultDependencies.readTimeFormatPreferenceFn,
     readTimeZonePreferenceFn:
@@ -316,6 +417,9 @@ function buildRuntimeContext({ serviceOptions, commandContext, defaultDependenci
     resolveCurrentChannelTopicFn:
       mergedOptions.resolveCurrentChannelTopicFn ||
       defaultDependencies.resolveCurrentChannelTopicFn,
+    updateCurrentChannelTopicFn:
+      mergedOptions.updateCurrentChannelTopicFn ||
+      defaultDependencies.updateCurrentChannelTopicFn,
     resolveDeployAccessFn:
       mergedOptions.resolveDeployAccessFn || defaultDependencies.resolveDeployAccessFn,
     resolveAiClientFn:
@@ -362,6 +466,11 @@ function buildRuntimeContext({ serviceOptions, commandContext, defaultDependenci
       defaultDependencies.setErrorTrackingEnvironmentFn,
     setErrorTrackingProjectFn:
       mergedOptions.setErrorTrackingProjectFn || defaultDependencies.setErrorTrackingProjectFn,
+    setDeploymentGateStateFn:
+      mergedOptions.setDeploymentGateStateFn || defaultDependencies.setDeploymentGateStateFn,
+    setDeploymentGateStateWithAuditFn:
+      mergedOptions.setDeploymentGateStateWithAuditFn ||
+      defaultDependencies.setDeploymentGateStateWithAuditFn,
     setEnvironmentStatusChannelFn:
       mergedOptions.setEnvironmentStatusChannelFn || defaultDependencies.setEnvironmentStatusChannelFn,
     setEnvironmentStatusEnabledFn:
@@ -392,6 +501,8 @@ function buildRuntimeContext({ serviceOptions, commandContext, defaultDependenci
     setSupportEmailOnCallFn:
       mergedOptions.setSupportEmailOnCallFn || defaultDependencies.setSupportEmailOnCallFn,
     sendInterimResponseFn: mergedOptions.sendInterimResponseFn || null,
+    runDoctorDiagnosticsFn:
+      mergedOptions.runDoctorDiagnosticsFn || defaultDependencies.runDoctorDiagnosticsFn,
     communicationClient,
     currentChannelId,
     currentChannelName,
@@ -408,10 +519,13 @@ function buildRuntimeContext({ serviceOptions, commandContext, defaultDependenci
     enableDeploymentCompletionNotifications: Boolean(
       mergedOptions.enableDeploymentCompletionNotifications,
     ),
+    enableGateControl: Boolean(mergedOptions.enableGateControl),
     triggerProdDeployFn:
       mergedOptions.triggerProdDeployFn ||
       deriveDeployTriggerFunction(deployPlatform) ||
       defaultDependencies.triggerProdDeployFn,
+    completeDeploymentRunFn:
+      mergedOptions.completeDeploymentRunFn || defaultDependencies.completeDeploymentRunFn,
     updateSupportEmailRuntimeStateFn:
       mergedOptions.updateSupportEmailRuntimeStateFn ||
       defaultDependencies.updateSupportEmailRuntimeStateFn,
@@ -444,6 +558,51 @@ async function triggerProductionDeploymentUnavailable() {
 
 async function waitForProductionDeploymentCompletionUnavailable() {
   throw new Error("Deploy provider is not configured.");
+}
+
+async function runDefaultDoctorDiagnostics(runtime) {
+  const checks = [];
+  try {
+    await runtime.pool?.query("SELECT 1");
+    checks.push({ label: "Database", status: runtime.pool ? "ok" : "error", detail: runtime.pool ? "Connected." : "Pool is not configured." });
+  } catch (error) {
+    checks.push({ label: "Database", status: "error", detail: error.message });
+  }
+
+  const topic = typeof runtime.resolveCurrentChannelTopicFn === "function"
+    ? await runtime.resolveCurrentChannelTopicFn(runtime)
+    : null;
+  checks.push({
+    label: "Channel topic access",
+    status: topic ? "ok" : "warning",
+    detail: topic ? "Current channel topic is readable." : "Topic unavailable; explicit gate state is recommended.",
+  });
+  checks.push({
+    label: "Deploy provider",
+    status: runtime.deployConfig?.deployProductionAppId ? "ok" : "warning",
+    detail: runtime.deployConfig?.deployProductionAppId
+      ? `${runtime.deployConfig.deployProvider || "Configured provider"} has a production target.`
+      : "Production deployment target is not configured.",
+  });
+  checks.push({
+    label: "Completion monitoring",
+    status: typeof runtime.waitForProdDeployCompletionFn === "function" ? "ok" : "error",
+    detail: "Deployment completion tracking is available.",
+  });
+  return checks;
+}
+
+function hasQueryablePool(pool) {
+  return Boolean(pool && typeof pool.query === "function");
+}
+
+function calculateDurationSeconds(startedAt, completedAt) {
+  const startTimestamp = new Date(startedAt || "").getTime();
+  const completedTimestamp = new Date(completedAt || "").getTime();
+  if (!Number.isFinite(startTimestamp) || !Number.isFinite(completedTimestamp)) {
+    return null;
+  }
+  return Math.max(Math.round((completedTimestamp - startTimestamp) / 1000), 0);
 }
 
 async function finalizeProductionDeployment(runtimeContext, deploymentFinalization = {}) {
@@ -481,8 +640,29 @@ async function finalizeProductionDeployment(runtimeContext, deploymentFinalizati
     );
     const normalizedDeployedPullRequestMarkingResult =
       normalizeDeployedPullRequestMarkingResult(deployedPullRequestMarkingResult);
+    let deploymentRun = null;
+    if (deploymentFinalization.deploymentRunId) {
+      deploymentRun = await runtimeContext.completeDeploymentRunFn(
+        transactionClient,
+        deploymentFinalization.deploymentRunId,
+        { status: "succeeded" },
+      );
+      await runtimeContext.insertAuditEventFn(transactionClient, {
+        actorUserId: runtimeContext.userId,
+        environment: "prod",
+        eventType: "deployment_succeeded",
+        metadata: {
+          deployedPullRequestCount:
+            normalizedDeployedPullRequestMarkingResult.deployedPullRequestCount,
+          externalDeploymentId,
+          runId: deploymentFinalization.deploymentRunId,
+        },
+        summary: `Production deployment run #${deploymentFinalization.deploymentRunId} succeeded.`,
+      });
+    }
 
     return {
+      deploymentRun,
       deploymentRecord,
       deployedPullRequestCount:
         normalizedDeployedPullRequestMarkingResult.deployedPullRequestCount,
@@ -674,6 +854,27 @@ async function resolveCurrentChannelTopicFromCommunicationClient(runtimeContext)
   } catch (_error) {
     return null;
   }
+}
+
+async function updateCurrentChannelTopicFromCommunicationClient(
+  runtimeContext,
+  { environment, status },
+) {
+  const channelId = String(runtimeContext.currentChannelId || "").trim();
+  const conversationsApi = runtimeContext.communicationClient?.conversations;
+  if (
+    channelId === ""
+    || !conversationsApi
+    || typeof conversationsApi.info !== "function"
+    || typeof conversationsApi.setTopic !== "function"
+  ) {
+    return false;
+  }
+
+  const currentTopic = await resolveCurrentChannelTopicFromCommunicationClient(runtimeContext);
+  const updatedTopic = updateDeployAvailabilityInTopic(currentTopic, environment, status);
+  await conversationsApi.setTopic({ channel: channelId, topic: updatedTopic });
+  return true;
 }
 
 async function isWorkspaceAdmin(communicationClient, userId) {

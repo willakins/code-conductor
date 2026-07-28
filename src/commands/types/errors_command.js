@@ -69,6 +69,27 @@ class ErrorsCommand extends BaseCalypsoCommand {
         ...responseLines,
         ...issues.map(formatIssueLine),
       ].join("\n"),
+      {
+        presentation: {
+          tone: "warning",
+          title: "Tracked unresolved errors",
+          summary: `${issues.length} unresolved issue group(s) need attention.`,
+          facts: [
+            { label: "Project", value: config.projectSlug },
+            { label: "Environment", value: config.environment || "any" },
+            { label: "Last sync", value: String(config.lastSyncAt || "never") },
+          ],
+          sections: [{
+            title: "Issues",
+            items: issues.map((issue) => ({
+              title: `[${issue.shortId || issue.externalIssueId || "unknown"}] ${issue.title || "(untitled)"}`,
+              url: issue.url || "",
+              description: `${issue.level || "error"} · last seen ${issue.lastSeenAt || "unknown"}${issue.regressionCount > 0 ? ` · ${issue.regressionCount} regression(s)` : ""}`,
+            })),
+          }],
+          actions: [{ id: "refresh_errors", label: "Refresh", command: "errors" }],
+        },
+      },
     );
   }
 }

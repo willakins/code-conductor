@@ -3,20 +3,27 @@ const test = require("node:test");
 
 const {
   addUserToDeployWhitelist,
+  completeDeploymentRun,
+  consumeDeploymentConfirmation,
+  createDeploymentConfirmation,
   createPool,
   getConfiguredTimeFormat,
+  getDeploymentGateState,
   getConfiguredTimeZone,
   getRuntimeProviderConfig,
   getReviewRecapConfig,
   isUserWhitelistedForDeploy,
   insertDeployment,
+  insertAuditEvent,
   listDeployablePullRequestsForDeployment,
   listBlockingPullRequests,
+  listAuditEvents,
   listGithubSlackUserMappings,
   listOpenPullRequestsForReviewRecapSince,
   listOpenPullRequestsWaitingOnReviewSince,
   listRecentlyTestedPullRequests,
   markAllUntestedPullRequestsTested,
+  markDeploymentRunTriggered,
   markPullRequestsDeployed,
   markPullRequestsDeployedSince,
   setConfiguredCodeHostProvider,
@@ -26,8 +33,11 @@ const {
   setConfiguredEmailProvider,
   setConfiguredAiProvider,
   setConfiguredErrorTrackingProvider,
+  setDeploymentGateState,
+  setDeploymentGateStateWithAudit,
   setGithubSlackUserMapping,
   setPullRequestForceDeployBlocked,
+  reserveDeploymentRun,
   markStaleOpenPullRequestsClosed,
   markReviewRecapSent,
   setConfiguredTimeFormat,
@@ -44,6 +54,152 @@ const {
   upsertOpenPullRequestReviewState,
   upsertPullRequestAsUntestedFromSync,
 } = require("../../src/db");
+
+test("deployment gate state is persisted as an authoritative environment setting", async () => {
+  const calls = [];
+  const pool = {
+    async query(sql, params) {
+      calls.push({ sql, params });
+      return {
+        rows: [{
+          changed_by: "U1",
+          environment: "prod",
+          reason: "Incident",
+          status: "closed",
+        }],
+      };
+    },
+  };
+
+  const state = await setDeploymentGateState(pool, {
+    actorUserId: "U1",
+    environment: "prod",
+    reason: "Incident",
+    status: "closed",
+  });
+  await getDeploymentGateState(pool, "prod");
+
+  assert.equal(state.status, "closed");
+  assert.match(calls[0].sql, /ON CONFLICT \(environment\) DO UPDATE/);
+  assert.deepEqual(calls[0].params, ["prod", "closed", "Incident", "U1"]);
+  assert.match(calls[1].sql, /FROM deployment_gate_state/);
+});
+
+test("gate state and its audit event commit in one transaction", async () => {
+  const calls = [];
+  const client = {
+    async query(sql) {
+      calls.push(String(sql).trim());
+      if (/RETURNING environment, status/.test(sql)) {
+        return { rows: [{ environment: "prod", reason: "Incident", status: "closed" }] };
+      }
+      if (/RETURNING id, event_type/.test(sql)) {
+        return { rows: [{ id: 1, event_type: "gate_closed" }] };
+      }
+      return { rows: [] };
+    },
+    release() {
+      calls.push("RELEASE");
+    },
+  };
+  const result = await setDeploymentGateStateWithAudit(
+    { connect: async () => client },
+    {
+      actorUserId: "U1",
+      environment: "prod",
+      reason: "Incident",
+      status: "closed",
+      summary: "Production gate closed.",
+    },
+  );
+
+  assert.equal(result.state.status, "closed");
+  assert.equal(result.event.event_type, "gate_closed");
+  assert.equal(calls[0], "BEGIN");
+  assert.equal(calls.at(-2), "COMMIT");
+  assert.equal(calls.at(-1), "RELEASE");
+});
+
+test("deployment confirmations are user-bound, expiring, and single-use", async () => {
+  const calls = [];
+  const pool = {
+    async query(sql, params) {
+      calls.push({ sql, params });
+      return {
+        rows: [{
+          environment: "prod",
+          requested_by: "U1",
+          token: "confirm-token",
+        }],
+      };
+    },
+  };
+
+  await createDeploymentConfirmation(pool, {
+    environment: "prod",
+    requestedBy: "U1",
+    token: "confirm-token",
+  });
+  await consumeDeploymentConfirmation(pool, {
+    environment: "prod",
+    requestedBy: "U1",
+    token: "confirm-token",
+  });
+
+  assert.match(calls[0].sql, /INTERVAL '10 minutes'/);
+  assert.match(calls[1].sql, /consumed_at IS NULL/);
+  assert.match(calls[1].sql, /expires_at > NOW/);
+  assert.deepEqual(calls[1].params, ["confirm-token", "prod", "U1"]);
+});
+
+test("deployment run lifecycle reserves, triggers, and completes one run", async () => {
+  const calls = [];
+  const pool = {
+    async query(sql, params) {
+      calls.push({ sql, params });
+      return { rows: [{ id: 7, environment: "prod" }] };
+    },
+  };
+
+  const reservation = await reserveDeploymentRun(pool, {
+    actorUserId: "U1",
+    environment: "prod",
+    provider: "digitalocean",
+  });
+  await markDeploymentRunTriggered(pool, 7, {
+    externalDeploymentId: "dep-7",
+    provider: "digitalocean",
+  });
+  await completeDeploymentRun(pool, 7, { status: "succeeded" });
+
+  assert.equal(reservation.acquired, true);
+  assert.match(calls[0].sql, /INSERT INTO deployment_runs/);
+  assert.match(calls[1].sql, /status = 'triggered'/);
+  assert.match(calls[2].sql, /completed_at = NOW/);
+});
+
+test("audit history writes structured metadata and lists newest events", async () => {
+  const calls = [];
+  const pool = {
+    async query(sql, params) {
+      calls.push({ sql, params });
+      return { rows: [{ id: 1, summary: "Production gate closed." }] };
+    },
+  };
+
+  await insertAuditEvent(pool, {
+    actorUserId: "U1",
+    environment: "prod",
+    eventType: "gate_closed",
+    metadata: { reason: "Incident" },
+    summary: "Production gate closed.",
+  });
+  const events = await listAuditEvents(pool, { environment: "prod", limit: 10 });
+
+  assert.equal(events[0].summary, "Production gate closed.");
+  assert.equal(calls[0].params[4], JSON.stringify({ reason: "Incident" }));
+  assert.match(calls[1].sql, /ORDER BY created_at DESC/);
+});
 
 test("createPool requires DATABASE_URL", () => {
   assert.throws(() => createPool(""), /DATABASE_URL is required/);

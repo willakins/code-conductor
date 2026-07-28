@@ -39,6 +39,37 @@ function containsTopicStatus(topicSegment, tokens) {
   return tokens.some((token) => topicSegment.includes(token.toLowerCase()));
 }
 
+function updateDeployAvailabilityInTopic(topicText, deployEnvironment, status) {
+  const topic = String(topicText || "").trim();
+  const environmentLabel = String(deployEnvironment || "").toLowerCase() === "staging"
+    ? "Staging"
+    : "Production";
+  const marker = status === "closed" ? ":red_circle:" : ":large_green_circle:";
+  const labelPattern = new RegExp(`\\b(${environmentLabel}|${environmentLabel === "Production" ? "Prod" : "Staging"})\\b\\s*:`, "i");
+  const labelMatch = topic.match(labelPattern);
+  if (!labelMatch) {
+    return [topic, `${environmentLabel}: ${marker}`].filter(Boolean).join(" · ");
+  }
+
+  const labelEnd = labelMatch.index + labelMatch[0].length;
+  const before = topic.slice(0, labelEnd);
+  const after = topic.slice(labelEnd);
+  const otherEnvironmentPattern = environmentLabel === "Production"
+    ? /\bStaging\b\s*:/i
+    : /\b(?:Prod|Production)\b\s*:/i;
+  const otherEnvironmentMatch = after.match(otherEnvironmentPattern);
+  const segmentEnd = otherEnvironmentMatch?.index ?? after.length;
+  const targetSegment = after.slice(0, segmentEnd);
+  const remainingTopic = after.slice(segmentEnd);
+  const markerPattern =
+    /(\s*)(:red_circle:|:large_red_circle:|🔴|:green_circle:|:large_green_circle:|🟢)/i;
+  if (markerPattern.test(targetSegment)) {
+    return `${before}${targetSegment.replace(markerPattern, `$1${marker}`)}${remainingTopic}`;
+  }
+  return `${before} ${marker}${targetSegment}${remainingTopic}`;
+}
+
 module.exports = {
   readDeployAvailabilityFromTopic,
+  updateDeployAvailabilityInTopic,
 };

@@ -1,8 +1,11 @@
 const { ConfigCommand } = require("../types/config_command");
 const { DeployCommand } = require("../types/deploy_command");
+const { DoctorCommand } = require("../types/doctor_command");
 const { EmailsCommand } = require("../types/emails_command");
 const { ErrorsCommand } = require("../types/errors_command");
 const { HelpCommand } = require("../types/help_command");
+const { GateCommand } = require("../types/gate_command");
+const { HistoryCommand } = require("../types/history_command");
 const { MustTestCommand } = require("../types/must_test_command");
 const { ReviewsCommand } = require("../types/reviews_command");
 const { SyncCommand } = require("../types/sync_command");
@@ -16,11 +19,14 @@ function createCalypsoCommandRegistry(options = {}) {
   return new CalypsoCommandRegistry({
     commandDefinitions: [
       new HelpCommand({ botName }),
+      new DoctorCommand(),
       new ConfigCommand(),
       new ErrorsCommand(),
       new EmailsCommand(),
       new SyncCommand(),
       new StatusCommand(),
+      new GateCommand(),
+      new HistoryCommand(),
       new ReviewsCommand(),
       new TestedCommand(),
       new MustTestCommand(),

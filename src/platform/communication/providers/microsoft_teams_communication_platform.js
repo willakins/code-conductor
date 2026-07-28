@@ -211,9 +211,14 @@ function readRawRequestBody(request) {
 }
 
 function normalizeTeamsCommand(payload, botName) {
+  const submittedCommand =
+    payload?.value && typeof payload.value === "object"
+      ? payload.value.command
+      : null;
   const rawText = String(
     payload?.text ||
       payload?.command ||
+      submittedCommand ||
       payload?.value ||
       payload?.message ||
       "",

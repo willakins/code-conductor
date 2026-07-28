@@ -72,6 +72,16 @@ class ConfigCommand extends BaseCalypsoCommand {
     super("config");
   }
 
+  buildExecutionResult(responseText, additionalFields = {}) {
+    if (additionalFields.presentation) {
+      return super.buildExecutionResult(responseText, additionalFields);
+    }
+    return super.buildExecutionResult(responseText, {
+      ...additionalFields,
+      presentation: buildConfigPresentation(responseText),
+    });
+  }
+
   parse({ commandWords }) {
     if (commandWords.length < 2) {
       return this.buildRespondParsedCommand(buildConfigUsageMessage());
@@ -771,6 +781,28 @@ class ConfigCommand extends BaseCalypsoCommand {
 
     return "ephemeral";
   }
+}
+
+function buildConfigPresentation(responseText) {
+  const text = String(responseText || "").trim();
+  const isFailure = /\b(denied|invalid|failed|unavailable|could not|not configured)\b/i.test(text);
+  const isSuccess = /\b(updated|configured|set|enabled|disabled|cleared)\b/i.test(text);
+  return {
+    tone: isFailure ? "warning" : isSuccess ? "success" : "neutral",
+    title: isFailure
+      ? "Configuration needs attention"
+      : isSuccess
+        ? "Configuration updated"
+        : "Calypso configuration",
+    summary: text.split("\n")[0],
+    sections: text.includes("\n")
+      ? [{ title: "Details", text: text.split("\n").slice(1).join("\n") }]
+      : [],
+    actions: [
+      { id: "config_help", label: "Configuration help", command: "help config" },
+      { id: "run_doctor", label: "Run diagnostics", command: "doctor" },
+    ],
+  };
 }
 
 function isWorkspaceScopedConfigAction(action) {

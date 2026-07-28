@@ -3,6 +3,7 @@ const { formatTimestampByTimeFormat } = require("../../util/format");
 const {
   readDeployAvailabilityFromTopic,
 } = require("../../shared/deploy_availability");
+const { evaluateDeploymentGate } = require("../../shared/gate_decision");
 
 class StatusCommand extends BaseCalypsoCommand {
   constructor() {
@@ -27,7 +28,22 @@ class StatusCommand extends BaseCalypsoCommand {
       runtime.pool,
       lastProductionDeploymentAt,
     );
-    const productionTopicAvailability = await resolveProductionTopicAvailability(runtime);
+    const [productionTopicAvailability, explicitGateState, activeDeployment] = await Promise.all([
+      resolveProductionTopicAvailability(runtime),
+      runtime.enableGateControl
+        ? runtime.getDeploymentGateStateFn(runtime.pool, "prod")
+        : null,
+      runtime.enableGateControl
+        ? runtime.getActiveDeploymentRunFn(runtime.pool, "prod")
+        : null,
+    ]);
+    const gateDecision = evaluateDeploymentGate({
+      activeDeployment,
+      blockingPullRequests,
+      environment: "prod",
+      explicitGateState,
+      topicAvailability: productionTopicAvailability,
+    });
 
     const blockerResponseText = runtime.formatStatusResponseFn({
       lastDeployAt: lastProductionDeploymentAt,
@@ -37,14 +53,14 @@ class StatusCommand extends BaseCalypsoCommand {
     });
     const responseText = buildStatusResponseText({
       blockerResponseText,
-      productionTopicAvailability,
+      gateDecision,
     });
 
     return this.buildExecutionResult(responseText, {
       presentation: buildStatusPresentation({
         lastDeployAt: lastProductionDeploymentAt,
         blockers: blockingPullRequests,
-        productionTopicAvailability,
+        gateDecision,
         timeFormat,
         timeZone,
       }),
@@ -61,15 +77,21 @@ async function resolveProductionTopicAvailability(runtime) {
   return readDeployAvailabilityFromTopic(channelTopic, "prod");
 }
 
-function buildStatusResponseText({ blockerResponseText, productionTopicAvailability }) {
-  if (productionTopicAvailability !== "blocked") {
+function buildStatusResponseText({ blockerResponseText, gateDecision }) {
+  const nonPrReasons = gateDecision.reasons.filter(
+    (reason) => reason.code !== "untested_pull_requests",
+  );
+  if (nonPrReasons.length === 0) {
     return blockerResponseText;
   }
 
   const pullRequestGateText = String(blockerResponseText || "")
     .replace(/^No blockers/, "No untested PR blockers");
+  const reasonLead = nonPrReasons.some((reason) => reason.code === "channel_topic_blocked")
+    ? "Production deployment is blocked by the channel topic."
+    : `Production deployment is blocked: ${nonPrReasons.map((reason) => reason.message).join(" ")}`;
   return [
-    "Production deployment is blocked by the channel topic.",
+    reasonLead,
     pullRequestGateText,
   ].filter(Boolean).join("\n");
 }
@@ -77,28 +99,37 @@ function buildStatusResponseText({ blockerResponseText, productionTopicAvailabil
 function buildStatusPresentation({
   lastDeployAt,
   blockers,
-  productionTopicAvailability,
+  gateDecision,
   timeFormat,
   timeZone,
 }) {
   const blockingPullRequests = Array.isArray(blockers) ? blockers : [];
   const hasPullRequestBlockers = blockingPullRequests.length > 0;
-  const isTopicBlocked = productionTopicAvailability === "blocked";
-  const isProductionBlocked = hasPullRequestBlockers || isTopicBlocked;
+  const isTopicBlocked = gateDecision.reasons.some((reason) => reason.code === "channel_topic_blocked");
+  const isManualGateBlocked = gateDecision.reasons.some((reason) => reason.code === "manual_gate_closed");
+  const isDeploymentActive = gateDecision.reasons.some((reason) => reason.code === "deployment_in_progress");
+  const isProductionBlocked = !gateDecision.allowed;
 
   return {
     tone: isProductionBlocked ? "danger" : "success",
     title: isProductionBlocked ? "Production deploy is blocked" : "Production deploy is clear",
     summary: buildStatusSummary({
       blockingPullRequestCount: blockingPullRequests.length,
-      isTopicBlocked,
+      gateBlockDescription: isManualGateBlocked
+        ? "The explicit gate blocks production."
+        : isTopicBlocked
+          ? "The channel topic blocks production."
+          : "",
     }),
     facts: [
       {
         label: "Last production deploy",
         value: formatTimestampByTimeFormat(lastDeployAt, { timeFormat, timeZone }),
       },
-      ...buildTopicAvailabilityFacts(productionTopicAvailability),
+      {
+        label: gateDecision.gateSource === "channel_topic" ? "Channel topic" : "Gate",
+        value: `${formatGateStatus(gateDecision)} (${gateDecision.gateSource.replace("_", " ")})`,
+      },
       {
         label: "Blocking PRs",
         value: String(blockingPullRequests.length),
@@ -114,19 +145,33 @@ function buildStatusPresentation({
       : [],
     context: buildStatusContext({
       hasPullRequestBlockers,
-      isTopicBlocked,
+      isTopicBlocked: isTopicBlocked || isManualGateBlocked,
+      isDeploymentActive,
     }),
+    actions: [
+      { id: "refresh_status", label: "Refresh", command: "status" },
+      ...(gateDecision.allowed
+        ? [{ id: "deploy_prod", label: "Review deployment", command: "deploy prod", style: "primary" }]
+        : []),
+      { id: "view_history", label: "View history", command: "history prod" },
+      ...blockingPullRequests.slice(0, 2).map((pullRequest) => ({
+        id: `tested_${pullRequest.pr_number}`,
+        label: `Mark #${pullRequest.pr_number} tested`,
+        command: `tested ${pullRequest.pr_number}`,
+        confirm: `Mark PR #${pullRequest.pr_number} as tested?`,
+      })),
+    ],
   };
 }
 
-function buildStatusSummary({ blockingPullRequestCount, isTopicBlocked }) {
+function buildStatusSummary({ blockingPullRequestCount, gateBlockDescription }) {
   const hasPullRequestBlockers = blockingPullRequestCount > 0;
-  if (isTopicBlocked && hasPullRequestBlockers) {
+  if (gateBlockDescription && hasPullRequestBlockers) {
     const blockerLabel = blockingPullRequestCount === 1 ? "PR needs" : "PRs need";
-    return `The channel topic blocks production, and ${blockingPullRequestCount} ${blockerLabel} testing.`;
+    return `${gateBlockDescription} ${blockingPullRequestCount} ${blockerLabel} testing.`;
   }
-  if (isTopicBlocked) {
-    return "The channel topic blocks production. No untested PRs are waiting.";
+  if (gateBlockDescription) {
+    return `${gateBlockDescription} No untested PRs are waiting.`;
   }
   if (hasPullRequestBlockers) {
     const blockerLabel = blockingPullRequestCount === 1 ? "PR needs" : "PRs need";
@@ -135,27 +180,34 @@ function buildStatusSummary({ blockingPullRequestCount, isTopicBlocked }) {
   return "No untested pull requests are blocking production.";
 }
 
-function buildTopicAvailabilityFacts(productionTopicAvailability) {
-  if (productionTopicAvailability === "unknown") {
-    return [];
+function buildStatusContext({ hasPullRequestBlockers, isTopicBlocked, isDeploymentActive }) {
+  if (isDeploymentActive) {
+    return "A deployment is already in progress. Use `/calypso history prod` for details.";
   }
-
-  return [
-    {
-      label: "Channel topic",
-      value: productionTopicAvailability === "blocked" ? "Blocked" : "Available",
-    },
-  ];
-}
-
-function buildStatusContext({ hasPullRequestBlockers, isTopicBlocked }) {
   if (isTopicBlocked) {
-    return "Change the channel's Production topic marker from red before deploying.";
+    return "Change the channel's Production topic marker from red before deploying. You can also set an explicit gate with `/calypso gate open prod`.";
   }
   if (hasPullRequestBlockers) {
     return "When verified, mark a PR with `/calypso tested <PR_NUMBER>`.";
   }
   return "The production deploy gate is ready.";
+}
+
+function capitalize(value) {
+  const normalized = String(value || "");
+  return normalized ? `${normalized[0].toUpperCase()}${normalized.slice(1)}` : normalized;
+}
+
+function formatGateStatus(gateDecision) {
+  if (gateDecision.gateSource === "channel_topic") {
+    if (gateDecision.gateStatus === "closed") {
+      return "Blocked";
+    }
+    if (gateDecision.gateStatus === "open") {
+      return "Available";
+    }
+  }
+  return capitalize(gateDecision.gateStatus);
 }
 
 function formatPullRequestPresentationItem(pullRequest) {

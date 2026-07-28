@@ -19,7 +19,7 @@ function registerCalypsoCommand(app, options = {}) {
   const botName = resolveBotName(options.botName);
   const calypsoCommandService = createCalypsoCommandService(options);
 
-  app.command("/calypso", async ({ client, command, ack, respond }) => {
+  const commandHandler = async ({ client, command, ack, respond }) => {
     await ack();
     let parsedCommand = null;
 
@@ -74,7 +74,24 @@ function registerCalypsoCommand(app, options = {}) {
         text: errorText,
       }));
     }
-  });
+  };
+  app.command("/calypso", commandHandler);
+
+  if (typeof app.action === "function") {
+    app.action(/^calypso:/, async ({ ack, action, body, client, respond }) =>
+      commandHandler({
+        ack,
+        client,
+        command: {
+          channel_id: body?.channel?.id || body?.container?.channel_id || null,
+          channel_name: body?.channel?.name || null,
+          text: action?.value || "",
+          user_id: body?.user?.id || null,
+          user_name: body?.user?.username || body?.user?.name || null,
+        },
+        respond,
+      }));
+  }
 }
 
 async function sendDeploymentCompletionFollowUpIfNeeded({
@@ -90,7 +107,11 @@ async function sendDeploymentCompletionFollowUpIfNeeded({
     executionResult.shouldFinalizeProductionDeployment,
   );
   const externalDeploymentId = executionResult.externalDeploymentId || null;
-  if ((!shouldNotifyCompletion && !shouldFinalizeProductionDeployment) || !externalDeploymentId) {
+  const shouldTrackDeploymentRun = Boolean(executionResult.deploymentRunId);
+  if (
+    (!shouldNotifyCompletion && !shouldFinalizeProductionDeployment && !shouldTrackDeploymentRun)
+    || !externalDeploymentId
+  ) {
     return;
   }
 
@@ -267,23 +288,47 @@ async function waitForDeploymentCompletionAndFinalize({
     deployProvider: executionResult.deployProvider,
     userId,
   };
-  const completionState = await calypsoCommandService.waitForProdDeploymentCompletion(
-    externalDeploymentId,
-    commandContext,
-  );
-  let finalizationResult = null;
-
-  if (executionResult.shouldFinalizeProductionDeployment) {
-    finalizationResult = await calypsoCommandService.finalizeProductionDeployment(
-      executionResult.productionDeploymentFinalization,
+  try {
+    const completionState = await calypsoCommandService.waitForProdDeploymentCompletion(
+      externalDeploymentId,
       commandContext,
     );
-  }
+    let finalizationResult = null;
 
-  return {
-    completionState,
-    finalizationResult,
-  };
+    if (executionResult.shouldFinalizeProductionDeployment) {
+      finalizationResult = await calypsoCommandService.finalizeProductionDeployment(
+        executionResult.productionDeploymentFinalization,
+        commandContext,
+      );
+    }
+    if (
+      executionResult.deploymentRunId
+      && !executionResult.shouldFinalizeProductionDeployment
+    ) {
+      await calypsoCommandService.completeDeploymentRun(
+        executionResult.deploymentRunId,
+        { status: "succeeded" },
+        commandContext,
+      );
+    }
+
+    return {
+      completionState,
+      finalizationResult,
+    };
+  } catch (error) {
+    if (
+      executionResult.deploymentRunId
+      && error?.code !== "DEPLOY_STATE_ROLLED_BACK"
+    ) {
+      await calypsoCommandService.completeDeploymentRun(
+        executionResult.deploymentRunId,
+        { failureMessage: error.message, status: "failed" },
+        commandContext,
+      );
+    }
+    throw error;
+  }
 }
 
 async function buildDeploymentCompletionSuccessText({

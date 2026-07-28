@@ -119,6 +119,26 @@ class ReviewsCommand extends BaseCalypsoCommand {
           ),
         ]),
       ].join("\n"),
+      {
+        presentation: {
+          tone: "neutral",
+          title: "Pull requests waiting on review",
+          summary: `${sortedPullRequests.length} open pull request(s) need reviewer attention.`,
+          facts: [
+            { label: "PRs waiting", value: String(sortedPullRequests.length) },
+            { label: "Scope", value: parsedCommand.timeframe || "all open PRs" },
+          ],
+          sections: pullRequestSections.map((section) => ({
+            title: section.title,
+            items: section.pullRequests.map((pullRequest) => ({
+              title: `${pullRequest.repo}#${pullRequest.pr_number} — ${pullRequest.title || "(untitled)"}`,
+              url: pullRequest.url || "",
+              description: `Author: ${pullRequest.author_login || "unknown"} · Review: ${pullRequest.review_state || "waiting"}`,
+            })),
+          })),
+          actions: [{ id: "refresh_reviews", label: "Refresh", command: "reviews" }],
+        },
+      },
     );
   }
 }
