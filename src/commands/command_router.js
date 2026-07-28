@@ -19,9 +19,23 @@ function registerCalypsoCommand(app, options = {}) {
   const botName = resolveBotName(options.botName);
   const calypsoCommandService = createCalypsoCommandService(options);
 
-  const commandHandler = async ({ client, command, ack, respond }) => {
+  const commandHandler = async ({
+    client,
+    command,
+    ack,
+    respond,
+    respondsToInteractiveAction = false,
+  }) => {
     await ack();
     let parsedCommand = null;
+    const currentChannelId = resolveCommandChannelId(command);
+    const sendResponse = async (response) =>
+      sendCommunicationResponse({
+        communicationProvider: options.communicationProvider,
+        respond,
+        respondsToInteractiveAction,
+        response,
+      });
 
     try {
       parsedCommand = parseCalypsoCommand({
@@ -34,10 +48,10 @@ function registerCalypsoCommand(app, options = {}) {
         userId,
         callerUserName: resolveCommandUserName(command),
         communicationClient: client,
-        currentChannelId: resolveCommandChannelId(command),
+        currentChannelId,
         currentChannelName: resolveCommandChannelName(command),
         sendInterimResponseFn: async ({ responseType, text, presentation }) => {
-          await respond(buildCommandResponse({
+          await sendResponse(buildCommandResponse({
             commandName: parsedCommand.commandName,
             communicationProvider: options.communicationProvider,
             responseType,
@@ -47,7 +61,7 @@ function registerCalypsoCommand(app, options = {}) {
         },
       });
 
-      await respond(buildCommandResponse({
+      await sendResponse(buildCommandResponse({
         commandName: parsedCommand.commandName,
         communicationProvider: options.communicationProvider,
         responseType: executionResult.responseType,
@@ -61,7 +75,7 @@ function registerCalypsoCommand(app, options = {}) {
         executionResult,
         communicationClient: client,
         communicationProvider: options.communicationProvider,
-        respond,
+        respond: sendResponse,
       });
     } catch (error) {
       console.error("Failed to process /calypso command.");
@@ -90,8 +104,26 @@ function registerCalypsoCommand(app, options = {}) {
           user_name: body?.user?.username || body?.user?.name || null,
         },
         respond,
+        respondsToInteractiveAction: true,
       }));
   }
+}
+
+async function sendCommunicationResponse({
+  communicationProvider,
+  respond,
+  respondsToInteractiveAction,
+  response,
+}) {
+  const shouldPublishNewSlackActionResponse =
+    String(communicationProvider || "").trim().toLowerCase() === "slack"
+    && response?.response_type === "in_channel"
+    && respondsToInteractiveAction;
+  await respond(
+    shouldPublishNewSlackActionResponse
+      ? { ...response, replace_original: false }
+      : response,
+  );
 }
 
 async function sendDeploymentCompletionFollowUpIfNeeded({

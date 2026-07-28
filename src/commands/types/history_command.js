@@ -36,17 +36,15 @@ class HistoryCommand extends BaseCalypsoCommand {
           summary: parsedCommand.environment
             ? `Recent ${parsedCommand.environment} gate and deployment events.`
             : "Recent gate and deployment events.",
-          sections: [{
-            title: "Latest events",
-            items: events.map((event) => ({
-              title: event.summary,
-              description: [
-                event.actor_user_id ? `by ${event.actor_user_id}` : "",
-                formatTimestampByTimeFormat(event.created_at, { timeFormat, timeZone }),
-                ...formatAuditMetadata(event.metadata),
-              ].filter(Boolean).join(" · "),
-            })),
-          }],
+          sections: events.map((event, index) => ({
+            title: event.summary,
+            text: formatAuditEventText(event, {
+              communicationProvider: runtime.communicationProvider,
+              timeFormat,
+              timeZone,
+            }),
+            separator: index > 0,
+          })),
           actions: [{ id: "refresh_history", label: "Refresh", command: parsedCommand.environment ? `history ${parsedCommand.environment}` : "history" }],
         },
       },
@@ -71,6 +69,27 @@ function formatAuditMetadata(rawMetadata) {
       ? `${Number(metadata.deployedPullRequestCount)} PR(s)`
       : "",
   ].filter(Boolean);
+}
+
+function formatAuditActor(actorUserId, communicationProvider) {
+  const normalizedActorUserId = String(actorUserId || "").trim();
+  const isSlackProvider =
+    String(communicationProvider || "").trim().toLowerCase() === "slack";
+  if (isSlackProvider && /^[UW][A-Z0-9]+$/i.test(normalizedActorUserId)) {
+    return `<@${normalizedActorUserId.toUpperCase()}>`;
+  }
+  return normalizedActorUserId;
+}
+
+function formatAuditEventText(event, { communicationProvider, timeFormat, timeZone }) {
+  const eventContext = [
+    event.actor_user_id
+      ? `by ${formatAuditActor(event.actor_user_id, communicationProvider)}`
+      : "",
+    formatTimestampByTimeFormat(event.created_at, { timeFormat, timeZone }),
+  ].filter(Boolean).join(" · ");
+  const metadata = formatAuditMetadata(event.metadata).join(" · ");
+  return [eventContext, metadata].filter(Boolean).join("\n");
 }
 
 function normalizeMetadata(rawMetadata) {

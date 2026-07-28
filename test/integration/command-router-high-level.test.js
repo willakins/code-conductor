@@ -112,7 +112,11 @@ test("high-level command lifecycle: status -> forced deploy -> status", async ()
   );
   assert.match(
     changesIncludedBlock.text.text,
-    /Feature PR/,
+    /<https:\/\/github\.com\/croft-eng\/croft\/pull\/700\|Feature PR> by <@U123ABC> · croft-eng\/croft#700 · Included/,
+  );
+  assert.doesNotMatch(
+    changesIncludedBlock.text.text,
+    /<https:\/\/github\.com\/croft-eng\/croft\/pull\/700\|Feature PR>\n/,
   );
   assert.equal(deploySuccess.response_type, "in_channel");
   assert.match(deploySuccess.text, /Deployment dep-999 finished successfully with phase ACTIVE/);
