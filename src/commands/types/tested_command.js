@@ -7,7 +7,10 @@ const {
   formatTimestampByTimeFormat,
 } = require("../../util/format");
 const { readDeployAvailabilityFromTopic } = require("../../shared/deploy_availability");
-const { evaluateDeploymentGate } = require("../../shared/gate_decision");
+const {
+  evaluateDeploymentGate,
+  readMustTestBlockingPullRequests,
+} = require("../../shared/gate_decision");
 
 class TestedCommand extends BaseCalypsoCommand {
   constructor() {
@@ -166,13 +169,14 @@ class TestedCommand extends BaseCalypsoCommand {
       summary: responseText,
     });
     const lastDeployAt = await runtime.getLastProdDeployAtFn(runtime.pool);
-    const [blockingPullRequests, explicitGateState, activeDeployment, channelTopic] =
+    const [untestedPullRequests, explicitGateState, activeDeployment, channelTopic] =
       await Promise.all([
         runtime.listBlockingPullRequestsFn(runtime.pool, lastDeployAt),
         runtime.getDeploymentGateStateFn(runtime.pool, "prod"),
         runtime.getActiveDeploymentRunFn(runtime.pool, "prod"),
         runtime.resolveCurrentChannelTopicFn(runtime),
       ]);
+    const blockingPullRequests = readMustTestBlockingPullRequests(untestedPullRequests);
     const decision = evaluateDeploymentGate({
       activeDeployment,
       blockingPullRequests,
@@ -209,13 +213,15 @@ class TestedCommand extends BaseCalypsoCommand {
 
 async function hasProductionPullRequestBlockers(runtime) {
   const lastDeployAt = await runtime.getLastProdDeployAtFn(runtime.pool);
-  const blockers = await runtime.listBlockingPullRequestsFn(runtime.pool, lastDeployAt);
+  const untestedPullRequests = await runtime.listBlockingPullRequestsFn(runtime.pool, lastDeployAt);
+  const blockers = readMustTestBlockingPullRequests(untestedPullRequests);
   return blockers.length > 0;
 }
 
 async function isProductionPullRequestBlocker(runtime, prNumber) {
   const lastDeployAt = await runtime.getLastProdDeployAtFn(runtime.pool);
-  const blockers = await runtime.listBlockingPullRequestsFn(runtime.pool, lastDeployAt);
+  const untestedPullRequests = await runtime.listBlockingPullRequestsFn(runtime.pool, lastDeployAt);
+  const blockers = readMustTestBlockingPullRequests(untestedPullRequests);
   return blockers.some((pullRequest) => Number(pullRequest.pr_number) === Number(prNumber));
 }
 
