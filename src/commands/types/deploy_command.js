@@ -7,22 +7,32 @@ class DeployCommand extends BaseCalypsoCommand {
   }
 
   parse({ commandWords }) {
-    const hasEnvironmentArgument = commandWords.length === 2 || commandWords.length === 3;
+    if (commandWords.length === 1) {
+      return this.buildParsedCommand({
+        action: "deploy_default",
+        deployEnvironment: null,
+      });
+    }
+
     const environmentName = (commandWords[1] || "").toLowerCase();
-    const forceWord = (commandWords[2] || "").toLowerCase();
-    const isForceDeployWord = forceWord === "force" || forceWord === "forced";
-    const hasValidForceArgument = commandWords.length === 2 || isForceDeployWord;
+    if (commandWords.length === 2 && environmentName === "list") {
+      return this.buildParsedCommand({
+        commandName: "status",
+        action: "status",
+      });
+    }
+
     const hasValidEnvironmentName = environmentName === "prod" || environmentName === "staging";
-    const isValidDeployCommand =
-      hasEnvironmentArgument && hasValidForceArgument && hasValidEnvironmentName;
+    const isValidDeployCommand = commandWords.length === 2 && hasValidEnvironmentName;
 
     if (!isValidDeployCommand) {
       return this.buildRespondParsedCommand(
         [
           "Usage:",
+          "`/calypso deploy`",
           "`/calypso deploy staging`",
           "`/calypso deploy prod`",
-          "`/calypso deploy prod force`",
+          "`/calypso deploy list`",
         ].join("\n"),
       );
     }
@@ -30,7 +40,6 @@ class DeployCommand extends BaseCalypsoCommand {
     return this.buildParsedCommand({
       action: environmentName === "staging" ? "deploy_staging" : "deploy_prod",
       deployEnvironment: environmentName,
-      forceDeployment: isForceDeployWord,
     });
   }
 
@@ -50,13 +59,16 @@ class DeployCommand extends BaseCalypsoCommand {
   }
 
   async execute({ parsedCommand, runtime }) {
+    if (parsedCommand.action === "respond") {
+      return this.buildExecutionResult(parsedCommand.responseText);
+    }
+
     if (!runtime.pool) {
       return this.buildExecutionResult("Deploy command unavailable: database pool is not configured.");
     }
 
-    const deployEnvironment = this.resolveDeployEnvironment(parsedCommand);
+    const deployEnvironment = await this.resolveDeployEnvironment(parsedCommand, runtime);
     const isProductionDeploy = deployEnvironment === "prod";
-    const forceDeployment = Boolean(parsedCommand.forceDeployment);
     const channelTopicGuardDecision = await this.evaluateChannelTopicGuard({
       runtime,
       deployEnvironment,
@@ -74,7 +86,7 @@ class DeployCommand extends BaseCalypsoCommand {
       deployGateState = await this.readDeployGateState(runtime);
       blockingPullRequestCount = deployGateState.blockingPullRequests.length;
 
-      if (blockingPullRequestCount > 0 && !forceDeployment) {
+      if (blockingPullRequestCount > 0) {
         return this.buildExecutionResult(
           [
             "Deploy blocked due to untested PRs:",
@@ -85,25 +97,6 @@ class DeployCommand extends BaseCalypsoCommand {
           ].join("\n"),
         );
       }
-
-      if (forceDeployment) {
-        const forceDeployBlockedPullRequests = readForceDeployBlockedPullRequests(
-          deployGateState.blockingPullRequests,
-        );
-        if (forceDeployBlockedPullRequests.length > 0) {
-          return this.buildExecutionResult(
-            [
-              "Force deploy blocked.",
-              "These PRs are marked as must-test and cannot be bypassed:",
-              ...forceDeployBlockedPullRequests.map(
-                (pr) =>
-                  `• ${formatPullRequestReference({ repo: pr.repo, prNumber: pr.pr_number, url: pr.url })} (${pr.status})`,
-              ),
-              "Mark them tested with `/calypso tested <PR_NUMBER>` or clear the requirement with `/calypso must-test off <PR_NUMBER>`.",
-            ].join("\n"),
-          );
-        }
-      }
     }
 
     const deployConfiguration = this.resolveDeployConfiguration(
@@ -111,12 +104,6 @@ class DeployCommand extends BaseCalypsoCommand {
       deployEnvironment,
     );
     if (!this.hasDeployConfiguration(deployConfiguration)) {
-      if (isProductionDeploy && forceDeployment && blockingPullRequestCount > 0) {
-        return this.buildExecutionResult(
-          `Force deploy bypassed ${blockingPullRequestCount} blocking PR(s), but deploy not configured.`,
-        );
-      }
-
       if (isProductionDeploy) {
         return this.buildExecutionResult("Deploy gate is clear, but deploy not configured.");
       }
@@ -129,7 +116,7 @@ class DeployCommand extends BaseCalypsoCommand {
         ? await this.readProductionDeploymentPlan({
             runtime,
             lastProductionDeploymentAt: deployGateState.lastProductionDeploymentAt,
-            includeUntested: forceDeployment,
+            includeUntested: false,
           })
         : null;
       const deployResult = await runtime.triggerProdDeployFn(deployConfiguration);
@@ -151,30 +138,6 @@ class DeployCommand extends BaseCalypsoCommand {
         isProductionDeploy && !externalDeploymentId
           ? "Calypso will not mark PRs deployed automatically because the deploy provider did not return a deployment id."
           : "";
-
-      if (isProductionDeploy && forceDeployment && blockingPullRequestCount > 0) {
-        return this.buildExecutionResult(
-          this.appendDeploymentSummary(
-            [
-              `Force deploy to prod is in progress (id: ${deploymentId}). Triggered by ${deploymentTriggeredBy}. Bypassed ${blockingPullRequestCount} blocking PR(s).`,
-              missingDeploymentIdText,
-            ].filter(Boolean).join(" "),
-            plannedPullRequestSummaryText,
-          ),
-          this.buildDeploymentExecutionFields({
-            externalDeploymentId,
-            deployProvider,
-            shouldNotifyDeploymentCompletion,
-            deployConfigOverrides: this.buildDeployConfigOverridesForCompletion(deployConfiguration),
-            productionDeploymentFinalization: this.buildProductionDeploymentFinalization({
-              isProductionDeploy,
-              externalDeploymentId,
-              deployProvider,
-              productionDeploymentPlan,
-            }),
-          }),
-        );
-      }
 
       if (!isProductionDeploy) {
         return this.buildExecutionResult(
@@ -262,8 +225,12 @@ class DeployCommand extends BaseCalypsoCommand {
     return hasDigitalOceanConfig || hasAwsConfig;
   }
 
-  resolveDeployEnvironment(parsedCommand) {
-    const rawEnvironment = String(parsedCommand.deployEnvironment || "prod").trim().toLowerCase();
+  async resolveDeployEnvironment(parsedCommand, runtime) {
+    let rawEnvironment = String(parsedCommand.deployEnvironment || "").trim().toLowerCase();
+    if (rawEnvironment === "" && typeof runtime.getRuntimeProviderConfigFn === "function") {
+      const runtimeConfig = await runtime.getRuntimeProviderConfigFn(runtime.pool);
+      rawEnvironment = String(runtimeConfig.deployEnvironment || "").trim().toLowerCase();
+    }
     if (rawEnvironment === "staging") {
       return "staging";
     }
@@ -417,21 +384,6 @@ class DeployCommand extends BaseCalypsoCommand {
   }
 }
 
-function readForceDeployBlockedPullRequests(blockingPullRequests) {
-  return (Array.isArray(blockingPullRequests) ? blockingPullRequests : []).filter((pullRequest) =>
-    isForceDeployBlocked(pullRequest?.force_deploy_blocked),
-  );
-}
-
-function isForceDeployBlocked(value) {
-  if (value === true || value === 1 || value === "1") {
-    return true;
-  }
-
-  const normalizedValue = String(value || "").trim().toLowerCase();
-  return normalizedValue === "true" || normalizedValue === "t";
-}
-
 function normalizeDeployedPullRequests(deployedPullRequests) {
   return (Array.isArray(deployedPullRequests) ? deployedPullRequests : [])
     .map((pullRequest) => ({
@@ -440,6 +392,10 @@ function normalizeDeployedPullRequests(deployedPullRequests) {
       title: String(pullRequest?.title || "").trim() || null,
       url: String(pullRequest?.url || "").trim() || null,
       author_login: String(pullRequest?.author_login || "").trim() || null,
+      tested:
+        pullRequest?.tested === true ||
+        String(pullRequest?.status || "").trim().toLowerCase() === "tested" ||
+        Boolean(pullRequest?.tested_at),
     }))
     .filter((pullRequest) => Boolean(pullRequest.repo) && pullRequest.pr_number !== undefined);
 }
@@ -570,7 +526,8 @@ function formatDeployedPullRequestLine({
     pullRequest,
     slackUsernameByGithubUsername,
   });
-  return `• ${pullRequestTitleReference} by ${pullRequestAuthor}.`;
+  const testedText = pullRequest.tested ? " (tested)" : "";
+  return `• ${pullRequestTitleReference} by ${pullRequestAuthor}${testedText}.`;
 }
 
 function formatDeployedPullRequestTitleReference(pullRequest) {

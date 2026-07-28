@@ -35,6 +35,7 @@ const {
   setConfiguredCommunicationProvider,
   setConfiguredCodeHostProvider,
   setConfiguredDeployProvider,
+  setConfiguredDeployEnvironment,
   setConfiguredEmailProvider,
   setConfiguredAiProvider,
   setConfiguredErrorTrackingProvider,
@@ -179,6 +180,7 @@ function createDefaultDependencies() {
     setConfiguredCommunicationProviderFn: setConfiguredCommunicationProvider,
     setConfiguredCodeHostProviderFn: setConfiguredCodeHostProvider,
     setConfiguredDeployProviderFn: setConfiguredDeployProvider,
+    setConfiguredDeployEnvironmentFn: setConfiguredDeployEnvironment,
     setConfiguredEmailProviderFn: setConfiguredEmailProvider,
     setConfiguredAiProviderFn: setConfiguredAiProvider,
     setConfiguredErrorTrackingProviderFn: setConfiguredErrorTrackingProvider,
@@ -335,6 +337,9 @@ function buildRuntimeContext({ serviceOptions, commandContext, defaultDependenci
       defaultDependencies.setConfiguredCodeHostProviderFn,
     setConfiguredDeployProviderFn:
       mergedOptions.setConfiguredDeployProviderFn || defaultDependencies.setConfiguredDeployProviderFn,
+    setConfiguredDeployEnvironmentFn:
+      mergedOptions.setConfiguredDeployEnvironmentFn ||
+      defaultDependencies.setConfiguredDeployEnvironmentFn,
     setConfiguredEmailProviderFn:
       mergedOptions.setConfiguredEmailProviderFn || defaultDependencies.setConfiguredEmailProviderFn,
     setConfiguredAiProviderFn:
@@ -558,6 +563,10 @@ function normalizeDeployedPullRequests(deployedPullRequests) {
       title: String(pullRequest?.title || "").trim() || null,
       url: String(pullRequest?.url || "").trim() || null,
       author_login: String(pullRequest?.author_login || "").trim() || null,
+      tested:
+        pullRequest?.tested === true ||
+        String(pullRequest?.status || "").trim().toLowerCase() === "tested" ||
+        Boolean(pullRequest?.tested_at),
     }))
     .filter((pullRequest) => Boolean(pullRequest.repo) && pullRequest.pr_number !== undefined);
 }

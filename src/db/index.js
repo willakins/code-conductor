@@ -45,6 +45,7 @@ const REVIEW_RECAP_DEFAULTS = Object.freeze({
 const RUNTIME_PROVIDER_DEFAULTS = Object.freeze({
   communicationProvider: "slack",
   codeHostProvider: "github",
+  deployEnvironment: "prod",
   deployProvider: "digitalocean",
   emailProvider: "gmail",
   aiProvider: "openai",
@@ -264,6 +265,7 @@ async function listDeployablePullRequestsForDeployment(
       title,
       url,
       status,
+      tested_at,
       merged_at,
       (
         SELECT author_login
@@ -518,6 +520,7 @@ async function markPullRequestsDeployed(pool, pullRequests, deployedAt) {
         pull_requests.pr_number,
         pull_requests.title,
         pull_requests.url,
+        (pull_requests.tested_at IS NOT NULL) AS tested,
         (
           SELECT author_login
           FROM open_pr_review_state
@@ -526,7 +529,7 @@ async function markPullRequestsDeployed(pool, pullRequests, deployedAt) {
         ) AS author_login,
         targets.target_order
     )
-    SELECT repo, pr_number, title, url, author_login
+    SELECT repo, pr_number, title, url, author_login, tested
     FROM updated
     ORDER BY target_order ASC
   `;
@@ -913,6 +916,7 @@ async function getRuntimeProviderConfig(pool) {
       SELECT
         communication_provider,
         code_host_provider,
+        deploy_environment,
         deploy_provider,
         email_provider,
         ai_provider,
@@ -931,6 +935,9 @@ async function getRuntimeProviderConfig(pool) {
     codeHostProvider:
       normalizeCodeHostProvider(row.code_host_provider) ||
       RUNTIME_PROVIDER_DEFAULTS.codeHostProvider,
+    deployEnvironment:
+      normalizeDeployEnvironment(row.deploy_environment) ||
+      RUNTIME_PROVIDER_DEFAULTS.deployEnvironment,
     deployProvider:
       normalizeDeployProvider(row.deploy_provider) ||
       RUNTIME_PROVIDER_DEFAULTS.deployProvider,
@@ -2058,6 +2065,22 @@ async function setConfiguredDeployProvider(pool, deployProvider, updatedBy) {
   });
 }
 
+async function setConfiguredDeployEnvironment(pool, deployEnvironment, updatedBy) {
+  const normalizedDeployEnvironment = normalizeDeployEnvironment(deployEnvironment);
+  const normalizedUserId = normalizeUserId(updatedBy);
+  if (!normalizedDeployEnvironment) {
+    throw new Error(`Unsupported deploy environment: ${deployEnvironment}`);
+  }
+  if (!normalizedUserId) {
+    throw new Error("user id is required");
+  }
+
+  return upsertRuntimeProviderConfig(pool, {
+    deployEnvironment: normalizedDeployEnvironment,
+    updatedBy: normalizedUserId,
+  });
+}
+
 async function setConfiguredEmailProvider(pool, emailProvider, updatedBy) {
   const normalizedEmailProvider = normalizeEmailProvider(emailProvider);
   const normalizedUserId = normalizeUserId(updatedBy);
@@ -2578,6 +2601,7 @@ async function upsertRuntimeProviderConfig(pool, updates) {
         ai_provider,
         error_tracking_provider,
         updated_by,
+        deploy_environment,
         updated_at
       )
       VALUES (
@@ -2589,6 +2613,7 @@ async function upsertRuntimeProviderConfig(pool, updates) {
         COALESCE($5, '${RUNTIME_PROVIDER_DEFAULTS.aiProvider}'),
         COALESCE($6, '${RUNTIME_PROVIDER_DEFAULTS.errorTrackingProvider}'),
         $7,
+        COALESCE($8, '${RUNTIME_PROVIDER_DEFAULTS.deployEnvironment}'),
         NOW()
       )
       ON CONFLICT (id)
@@ -2600,10 +2625,12 @@ async function upsertRuntimeProviderConfig(pool, updates) {
         ai_provider = COALESCE($5, runtime_config.ai_provider),
         error_tracking_provider = COALESCE($6, runtime_config.error_tracking_provider),
         updated_by = EXCLUDED.updated_by,
+        deploy_environment = COALESCE($8, runtime_config.deploy_environment),
         updated_at = NOW()
       RETURNING
         communication_provider,
         code_host_provider,
+        deploy_environment,
         deploy_provider,
         email_provider,
         ai_provider,
@@ -2619,6 +2646,7 @@ async function upsertRuntimeProviderConfig(pool, updates) {
       updates.aiProvider || null,
       updates.errorTrackingProvider || null,
       updates.updatedBy || null,
+      updates.deployEnvironment || null,
     ],
   );
 
@@ -3326,6 +3354,11 @@ function normalizeDeployProvider(provider) {
     : null;
 }
 
+function normalizeDeployEnvironment(environment) {
+  const normalizedEnvironment = String(environment || "").toLowerCase().trim();
+  return ["prod", "staging"].includes(normalizedEnvironment) ? normalizedEnvironment : null;
+}
+
 function normalizePullRequestReviewState(reviewState) {
   const normalizedReviewState = String(reviewState || "").toLowerCase().trim();
   if (normalizedReviewState === "approved") {
@@ -3419,6 +3452,7 @@ module.exports = {
   setConfiguredCommunicationProvider,
   setConfiguredCodeHostProvider,
   setConfiguredDeployProvider,
+  setConfiguredDeployEnvironment,
   setConfiguredEmailProvider,
   setConfiguredAiProvider,
   setConfiguredErrorTrackingProvider,

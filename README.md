@@ -22,6 +22,7 @@ OpenAI or Anthropic, and can poll Sentry or Rollbar for newly tracked unresolved
   - `/calypso config communication-provider:slack|microsoft_teams`
   - `/calypso config code-host-provider:github|bitbucket`
   - `/calypso config deploy-provider:digitalocean|aws`
+  - `/calypso config deploy-environment:prod|staging`
   - `/calypso config email-provider:gmail|outlook`
   - `/calypso config ai-provider:openai|anthropic`
   - `/calypso config error-tracking-provider:sentry|rollbar`
@@ -53,6 +54,8 @@ OpenAI or Anthropic, and can poll Sentry or Rollbar for newly tracked unresolved
   - `/calypso tested <PR_NUMBER>`
   - `/calypso must-test <PR_NUMBER>`
   - `/calypso must-test off <PR_NUMBER>`
+  - `/calypso deploy`
+  - `/calypso deploy list`
   - `/calypso deploy staging`
   - `/calypso deploy prod`
 - Enforces deploy blocking rules:
@@ -1000,21 +1003,24 @@ Rules:
 - Lists PRs tested in the selected recent timeframe.
 - Includes PR number, repo, status, tester, and tested timestamp.
 
-`/calypso must-test <PR_NUMBER>`
-
-- Marks a PR as requiring testing before `deploy prod force` can bypass blockers.
-- Restricted to workspace admins or already-whitelisted users.
-
-`/calypso must-test off <PR_NUMBER>`
-
-- Removes the force-deploy test requirement for that PR.
-- Restricted to workspace admins or already-whitelisted users.
-
 `/calypso whitelist <@USER>`
 
 - Restricted command for workspace admins or already-whitelisted users.
 - Adds a user to Calypso deploy whitelist.
 - Whitelisted users can run deploy commands even if they are not workspace admins.
+
+`/calypso config deploy-environment:prod|staging`
+
+- Sets the workspace-wide default environment used by `/calypso deploy`.
+
+`/calypso deploy`
+
+- Deploys to the configured default environment (`prod` by default).
+- Applies the same access, channel-topic, and production blocker checks as an explicit environment command.
+
+`/calypso deploy list`
+
+- Alias for `/calypso status`.
 
 `/calypso deploy prod`
 
@@ -1025,12 +1031,13 @@ Rules:
 - If configured and deploy is initiated:
   - shows the triggering Slack user as a Slack mention
   - includes a `PRs to deploy` list with PR title links and mapped author handles
+  - labels each PR that was tested with `(tested)`
   - does not insert a `deployments` row yet
   - does not mark PRs as `deployed` yet
 - After the deploy provider reports success:
   - inserts a `deployments` row
   - marks only the planned PRs as `deployed`
-  - includes a `Deployed PRs` list in the follow-up response
+  - includes a `Deployed PRs` list with the tested labels in the follow-up response
 - If the provider does not return an external deployment id:
   - does not write deployment row
   - does not mark PRs deployed
@@ -1048,14 +1055,6 @@ Rules:
 - Does not run prod blocker checks.
 - Does not mark PRs as deployed.
 - Sends a deployment-completion follow-up when provider returns an external deployment id.
-
-`/calypso deploy prod force` (or `/calypso deploy prod forced`)
-
-- Bypasses blocker checks and triggers deploy anyway.
-- Cannot bypass blockers that are explicitly marked as must-test.
-- Still requires deploy configuration (`DEPLOY_TOKEN`, `DEPLOY_PROD_APP_ID`).
-- Lists the tested and bypassed untested PRs that are planned for deployment.
-- Marks only those planned PRs as `deployed` after the provider reports success.
 
 ## Review Recap
 

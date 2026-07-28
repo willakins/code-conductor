@@ -21,6 +21,7 @@ const {
   markPullRequestsDeployedSince,
   setConfiguredCodeHostProvider,
   setConfiguredCommunicationProvider,
+  setConfiguredDeployEnvironment,
   setConfiguredDeployProvider,
   setConfiguredEmailProvider,
   setConfiguredAiProvider,
@@ -1052,6 +1053,7 @@ test("getRuntimeProviderConfig returns defaults when singleton row is missing", 
   assert.deepEqual(result, {
     communicationProvider: "slack",
     codeHostProvider: "github",
+    deployEnvironment: "prod",
     deployProvider: "digitalocean",
     emailProvider: "gmail",
     aiProvider: "openai",
@@ -1067,6 +1069,7 @@ test("getRuntimeProviderConfig returns configured providers", async () => {
           {
             communication_provider: "microsoft_teams",
             code_host_provider: "bitbucket",
+            deploy_environment: "staging",
             deploy_provider: "aws",
             email_provider: "outlook",
             ai_provider: "anthropic",
@@ -1082,6 +1085,7 @@ test("getRuntimeProviderConfig returns configured providers", async () => {
   assert.deepEqual(result, {
     communicationProvider: "microsoft_teams",
     codeHostProvider: "bitbucket",
+    deployEnvironment: "staging",
     deployProvider: "aws",
     emailProvider: "outlook",
     aiProvider: "anthropic",
@@ -1413,6 +1417,25 @@ test("setConfiguredDeployProvider rejects unsupported provider", async () => {
   await assert.rejects(async () => {
     await setConfiguredDeployProvider(pool, "render", "UADMIN");
   }, /Unsupported deploy provider/);
+});
+
+test("setConfiguredDeployEnvironment upserts the default environment", async () => {
+  const captured = {};
+  const pool = {
+    async query(sql, params) {
+      captured.sql = sql;
+      captured.params = params;
+      return {
+        rows: [{ deploy_environment: "staging", updated_by: "UADMIN" }],
+      };
+    },
+  };
+
+  const result = await setConfiguredDeployEnvironment(pool, "staging", "UADMIN");
+
+  assert.match(captured.sql, /INSERT INTO runtime_config/);
+  assert.equal(captured.params[7], "staging");
+  assert.equal(result.deploy_environment, "staging");
 });
 
 test("setConfiguredEmailProvider updates runtime config and clears email sync state", async () => {
