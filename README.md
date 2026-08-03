@@ -15,7 +15,7 @@ tools your team already uses.
   <img src="docs/assets/screenshots/production-readiness.png" alt="Code Conductor showing production readiness, PR test state, and application health in Slack" width="900">
 </p>
 
-<p align="center"><sub>Product preview with fictional workspace data.</sub></p>
+<p align="center"><sub>Representative Slack rendering of the current Block Kit structure with fictional workspace data.</sub></p>
 
 ## Why Code Conductor?
 
@@ -53,8 +53,9 @@ completion, records the result atomically, announces what shipped, and continues
 ![Code Conductor automated production deployment in Slack](docs/assets/screenshots/automated-deploy.png)
 
 > [!NOTE]
-> The previews above use fictional data to demonstrate the Slack experience. The repository's
-> Block Kit renderer produces the live messages from real provider and database state.
+> The screenshots mirror the fields, actions, visibility, two-column layout, and tone accents emitted
+> by the current Block Kit renderer. Slack controls final typography and spacing, while message content
+> varies with live provider and database state.
 
 ## One Workflow, Pluggable Providers
 
