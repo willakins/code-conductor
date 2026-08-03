@@ -1,7 +1,7 @@
 {
-  "name": "calypso",
+  "name": "code-conductor",
   "version": "1.0.0",
-  "description": "",
+  "description": "A self-hosted engineering operations bot for PR reviews, testing, deployments, and production health.",
   "main": "index.js",
   "scripts": {
     "dev": "node src/app.js",
@@ -15,16 +15,25 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/willakins/Calypso.git"
+    "url": "git+https://github.com/willakins/code-conductor.git"
   },
-  "keywords": [],
+  "keywords": [
+    "chatops",
+    "devops",
+    "slack-bot",
+    "github",
+    "pull-requests",
+    "deployment-automation",
+    "monitoring",
+    "postgresql"
+  ],
   "author": "",
   "license": "ISC",
   "type": "commonjs",
   "bugs": {
-    "url": "https://github.com/willakins/Calypso/issues"
+    "url": "https://github.com/willakins/code-conductor/issues"
   },
-  "homepage": "https://github.com/willakins/Calypso#readme",
+  "homepage": "https://github.com/willakins/code-conductor#readme",
   "dependencies": {
     "@slack/bolt": "^4.6.0",
     "dotenv": "^17.3.1",

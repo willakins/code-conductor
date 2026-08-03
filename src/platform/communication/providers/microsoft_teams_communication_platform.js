@@ -11,7 +11,7 @@ const DEFAULT_TEAMS_COMMAND_PATH = "/communication/commands";
 class MicrosoftTeamsCommunicationPlatform extends BaseCommunicationPlatform {
   constructor({ config }) {
     super({ provider: "microsoft_teams" });
-    this.botName = String(config.botName || "Calypso");
+    this.botName = String(config.botName || "Code Conductor");
     this.teamsCommandPath = normalizeCommandPath(config.communicationCommandPath);
     this.teamsWebhookUrl = String(config.communicationWebhookUrl || "").trim();
     this.adminUserIds = new Set(normalizeAdminUserIds(config.communicationAdminUserIds));
@@ -50,7 +50,7 @@ class MicrosoftTeamsCommunicationPlatform extends BaseCommunicationPlatform {
         if (!normalizedCommand.commandText) {
           response.status(400).json({
             type: "message",
-            text: "Missing command text. Example: /calypso help",
+            text: "Missing command text. Example: /conductor help",
           });
           return;
         }
@@ -247,6 +247,11 @@ function stripBotPrefix(rawText, botName) {
   const normalizedText = String(rawText || "").trim();
   if (!normalizedText) {
     return "";
+  }
+
+  const commandPrefixMatch = normalizedText.match(/^\/(?:conductor|calypso)\s*(.*)$/i);
+  if (commandPrefixMatch) {
+    return commandPrefixMatch[1].trim();
   }
 
   const escapedBotName = escapeRegex(String(botName || "").trim());

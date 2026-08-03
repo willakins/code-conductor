@@ -14,7 +14,7 @@ class WhitelistCommand extends BaseCalypsoCommand {
     const targetUserReference = readCommunicationUserReferenceFromArgument(targetArgument);
 
     if (!targetUserReference) {
-      return this.buildRespondParsedCommand("Usage: `/calypso whitelist <@USER>`");
+      return this.buildRespondParsedCommand("Usage: `/conductor whitelist <@USER>`");
     }
 
     return this.buildParsedCommand({
@@ -37,7 +37,7 @@ class WhitelistCommand extends BaseCalypsoCommand {
   async execute({ parsedCommand, runtime }) {
     if (parsedCommand.action === "respond") {
       return this.buildExecutionResult(
-        parsedCommand.responseText || "Usage: `/calypso whitelist <@USER>`",
+        parsedCommand.responseText || "Usage: `/conductor whitelist <@USER>`",
       );
     }
 
@@ -74,7 +74,7 @@ async function resolveTargetUserId(runtime, parsedCommand) {
   if (!parsedCommand.targetUserId && !parsedCommand.targetUserHandle) {
     return {
       isResolvable: false,
-      reasonText: "Usage: `/calypso whitelist <@USER>`",
+      reasonText: "Usage: `/conductor whitelist <@USER>`",
     };
   }
 
@@ -92,7 +92,7 @@ async function resolveTargetUserId(runtime, parsedCommand) {
       isResolvable: false,
       reasonText: [
         `Cannot resolve \`@${targetUserHandle}\` with current Slack permissions.`,
-        "Use `/calypso whitelist <@USER>` or `/calypso whitelist U123ABC`.",
+        "Use `/conductor whitelist <@USER>` or `/conductor whitelist U123ABC`.",
       ].join(" "),
     };
   }
@@ -107,7 +107,7 @@ async function resolveTargetUserId(runtime, parsedCommand) {
       reasonText: [
         `Cannot resolve \`@${targetUserHandle}\` because Slack denied user lookup (\`missing_scope\`).`,
         `Grant the bot token user-read scope and reinstall the app.${neededText}${providedText}`,
-        "Or whitelist using a direct Slack user ID: `/calypso whitelist U123ABC`.",
+        "Or whitelist using a direct Slack user ID: `/conductor whitelist U123ABC`.",
       ].join(" "),
     };
   }
@@ -117,7 +117,7 @@ async function resolveTargetUserId(runtime, parsedCommand) {
       isResolvable: false,
       reasonText: [
         `Could not resolve \`@${targetUserHandle}\` to a Slack user.`,
-        "Use `/calypso whitelist <@USER>` or `/calypso whitelist U123ABC`.",
+        "Use `/conductor whitelist <@USER>` or `/conductor whitelist U123ABC`.",
       ].join(" "),
     };
   }
@@ -126,7 +126,7 @@ async function resolveTargetUserId(runtime, parsedCommand) {
     isResolvable: false,
     reasonText: [
       `Cannot resolve \`@${targetUserHandle}\` right now (Slack error: \`${resolution.platformErrorCode || "unknown_error"}\`).`,
-      "Use `/calypso whitelist <@USER>` or `/calypso whitelist U123ABC`.",
+      "Use `/conductor whitelist <@USER>` or `/conductor whitelist U123ABC`.",
     ].join(" "),
   };
 }

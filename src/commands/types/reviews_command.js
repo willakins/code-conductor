@@ -156,11 +156,11 @@ function normalizeGithubUser(rawGithubUser) {
 function buildUsageMessage() {
   return [
     "Usage:",
-    "`/calypso reviews`",
-    "`/calypso reviews <GITHUB_USER>`",
-    "`/calypso reviews <day|week|month>`",
-    "`/calypso reviews recent <day|week|month>`",
-    "`/calypso reviews <GITHUB_USER> <day|week|month>`",
+    "`/conductor reviews`",
+    "`/conductor reviews <GITHUB_USER>`",
+    "`/conductor reviews <day|week|month>`",
+    "`/conductor reviews recent <day|week|month>`",
+    "`/conductor reviews <GITHUB_USER> <day|week|month>`",
   ].join("\n");
 }
 

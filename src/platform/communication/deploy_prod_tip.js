@@ -1,5 +1,5 @@
 const DEPLOY_PROD_TIP_TEXT =
-  "Pro tip: you can use /calypso deploy prod instead.";
+  "Pro tip: you can use /conductor deploy prod instead.";
 
 function shouldSendDeployProdTip(rawText) {
   return normalizeMessageText(rawText) === "deploying prod";

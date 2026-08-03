@@ -1,20 +1,20 @@
 const MAX_SECTION_TEXT_LENGTH = 2800;
 
 const COMMAND_TITLES = {
-  config: "Calypso configuration",
-  deploy: "Calypso deployment",
-  doctor: "Calypso diagnostics",
+  config: "Code Conductor configuration",
+  deploy: "Code Conductor deployment",
+  doctor: "Code Conductor diagnostics",
   emails: "Support email",
   errors: "Error tracking",
-  help: "Calypso help",
+  help: "Code Conductor help",
   gate: "Deployment gate",
-  history: "Calypso activity",
+  history: "Code Conductor activity",
   "must-test": "Force-deploy protection",
   reviews: "Pull request reviews",
   status: "Production deploy status",
   sync: "Pull request sync",
   tested: "Testing confirmation",
-  unknown: "Calypso command",
+  unknown: "Code Conductor command",
   whitelist: "Deploy access",
 };
 

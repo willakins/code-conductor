@@ -21,7 +21,7 @@ const {
 } = require("../../src/config");
 
 const REQUIRED_ENV = {
-  DATABASE_URL: "postgresql://user:pass@localhost:5432/calypso",
+  DATABASE_URL: "postgresql://user:pass@localhost:5432/conductor",
   CODE_HOST_MAIN_BRANCH: "main",
   CODE_HOST_REPOSITORY: "croft-eng/croft",
   CODE_HOST_WEBHOOK_SECRET: "secret",
@@ -61,7 +61,7 @@ test("loadConfig defaults provider selections", { concurrency: false }, () => {
     },
     () => {
       const config = loadConfig();
-      assert.equal(config.botName, "Calypso");
+      assert.equal(config.botName, "Code Conductor");
       assert.equal(config.communicationProvider, DEFAULT_COMMUNICATION_PROVIDER);
       assert.equal(config.codeHostProvider, DEFAULT_CODE_HOST_PROVIDER);
       assert.equal(config.deployProvider, DEFAULT_DEPLOY_PROVIDER);
@@ -121,7 +121,7 @@ test("loadConfig reads required and optional values", { concurrency: false }, ()
       assert.equal(config.codeHostApiVersion, "2022-11-28");
       assert.equal(config.codeHostApiPageSize, 100);
       assert.equal(config.codeHostApiMaxPages, 100);
-      assert.equal(config.codeHostApiUserAgent, "calypso-bot");
+      assert.equal(config.codeHostApiUserAgent, "code-conductor-bot");
       assert.equal(config.deployPollIntervalSeconds, 15);
       assert.equal(config.deployTimeoutSeconds, 900);
       assert.equal(config.deployToken, "do-token");
@@ -166,7 +166,7 @@ test("loadConfig reads required and optional values", { concurrency: false }, ()
 test("loadConfig supports non-default provider selections without requiring unrelated provider env vars", { concurrency: false }, () => {
   withEnvironment(
     {
-      DATABASE_URL: "postgresql://user:pass@localhost:5432/calypso",
+      DATABASE_URL: "postgresql://user:pass@localhost:5432/conductor",
       COMMUNICATION_PROVIDER: "microsoft_teams",
       CODE_HOST_PROVIDER: "bitbucket",
       DEPLOY_PROVIDER: "aws",
@@ -387,7 +387,7 @@ test("loadConfig uses defaults for optional values", { concurrency: false }, () 
       assert.equal(config.codeHostApiVersion, "2022-11-28");
       assert.equal(config.codeHostApiPageSize, 100);
       assert.equal(config.codeHostApiMaxPages, 100);
-      assert.equal(config.codeHostApiUserAgent, "calypso-bot");
+      assert.equal(config.codeHostApiUserAgent, "code-conductor-bot");
       assert.equal(config.port, 3001);
     },
   );
@@ -474,13 +474,13 @@ test("loadConfig reads microsoft teams optional communication values", { concurr
     {
       ...REQUIRED_ENV,
       COMMUNICATION_WEBHOOK_URL: "  https://example.test/hook  ",
-      COMMUNICATION_COMMAND_PATH: " teams/calypso ",
+      COMMUNICATION_COMMAND_PATH: " teams/conductor ",
       COMMUNICATION_ADMIN_USER_IDS: " U1 ,U2, U3 ",
     },
     () => {
       const config = loadConfig();
       assert.equal(config.communicationWebhookUrl, "https://example.test/hook");
-      assert.equal(config.communicationCommandPath, "teams/calypso");
+      assert.equal(config.communicationCommandPath, "teams/conductor");
       assert.deepEqual(config.communicationAdminUserIds, ["U1", "U2", "U3"]);
     },
   );
@@ -511,7 +511,7 @@ test("loadConfig reads optional environment status and email polling values", { 
       EMAIL_GMAIL_CLIENT_ID: " gmail-client-id ",
       EMAIL_GMAIL_CLIENT_SECRET: " gmail-client-secret ",
       EMAIL_GMAIL_REFRESH_TOKEN: " gmail-refresh-token ",
-      EMAIL_GMAIL_PUBSUB_TOPIC: " projects/test/topics/calypso-support ",
+      EMAIL_GMAIL_PUBSUB_TOPIC: " projects/test/topics/conductor-support ",
       EMAIL_WEBHOOK_AUDIENCE: " https://example.com/email/webhook ",
       EMAIL_PUSH_SERVICE_ACCOUNT_EMAIL: " pubsub@example.iam.gserviceaccount.com ",
       EMAIL_WATCH_RENEW_INTERVAL_HOURS: "12",
@@ -543,7 +543,7 @@ test("loadConfig reads optional environment status and email polling values", { 
       assert.equal(config.emailGmailClientId, "gmail-client-id");
       assert.equal(config.emailGmailClientSecret, "gmail-client-secret");
       assert.equal(config.emailGmailRefreshToken, "gmail-refresh-token");
-      assert.equal(config.emailGmailPubsubTopic, "projects/test/topics/calypso-support");
+      assert.equal(config.emailGmailPubsubTopic, "projects/test/topics/conductor-support");
       assert.equal(config.emailWebhookAudience, "https://example.com/email/webhook");
       assert.equal(
         config.emailPushServiceAccountEmail,

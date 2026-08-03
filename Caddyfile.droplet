@@ -4,7 +4,7 @@
 }
 
 # Replace with your real domain.
-calypso.example.com {
+code-conductor.example.com {
   encode zstd gzip
   reverse_proxy app:{$PORT:3001}
 }

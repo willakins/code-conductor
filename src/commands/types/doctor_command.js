@@ -8,7 +8,7 @@ class DoctorCommand extends BaseCalypsoCommand {
   parse({ commandWords }) {
     return commandWords.length === 1
       ? this.buildParsedCommand({ action: "doctor" })
-      : this.buildRespondParsedCommand("Usage: `/calypso doctor`");
+      : this.buildRespondParsedCommand("Usage: `/conductor doctor`");
   }
 
   async checkCallerAccess({ runtime }) {
@@ -26,13 +26,13 @@ class DoctorCommand extends BaseCalypsoCommand {
     const failingChecks = checks.filter((check) => check.status !== "ok");
     return this.buildExecutionResult(
       failingChecks.length === 0
-        ? "All Calypso diagnostics passed."
-        : `${failingChecks.length} Calypso diagnostic check(s) need attention.`,
+        ? "All Code Conductor diagnostics passed."
+        : `${failingChecks.length} Code Conductor diagnostic check(s) need attention.`,
       {
         presentation: {
           tone: failingChecks.some((check) => check.status === "error") ? "danger"
             : failingChecks.length > 0 ? "warning" : "success",
-          title: "Calypso diagnostics",
+          title: "Code Conductor diagnostics",
           summary: failingChecks.length === 0
             ? "All configured runtime dependencies are healthy."
             : `${failingChecks.length} check(s) need attention.`,

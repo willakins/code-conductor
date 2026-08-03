@@ -34,14 +34,14 @@ class ErrorsCommand extends BaseCalypsoCommand {
 
     if (!config.projectSlug) {
       responseLines.push(
-        "Error tracking setup incomplete: configure `/calypso config error-tracking-project:<PROJECT_SLUG>`.",
+        "Error tracking setup incomplete: configure `/conductor config error-tracking-project:<PROJECT_SLUG>`.",
       );
       return this.buildExecutionResult(responseLines.join("\n"));
     }
 
     if (!config.targetChannelId) {
       responseLines.push(
-        "Error tracking setup incomplete: configure `/calypso config error-tracking-channel:<#CHANNEL|CHANNEL_ID>`.",
+        "Error tracking setup incomplete: configure `/conductor config error-tracking-channel:<#CHANNEL|CHANNEL_ID>`.",
       );
       return this.buildExecutionResult(responseLines.join("\n"));
     }
@@ -119,7 +119,7 @@ function formatIssueLine(issue) {
 function buildUsageMessage() {
   return [
     "Usage:",
-    "`/calypso errors`",
+    "`/conductor errors`",
   ].join("\n");
 }
 

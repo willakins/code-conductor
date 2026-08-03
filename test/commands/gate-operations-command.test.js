@@ -125,7 +125,7 @@ test("doctor renders operational checks without leaking secrets", async () => {
 
   const payload = await runCommand(handler, "doctor");
 
-  assert.match(payload.text, /1 Calypso diagnostic check/);
+  assert.match(payload.text, /1 Code Conductor diagnostic check/);
   assert.match(JSON.stringify(payload.blocks), /Target missing/);
 });
 
@@ -273,8 +273,8 @@ test("Slack action values execute through the same command router", async () => 
     },
   });
 
-  assert.match(payload.text, /\/calypso status/);
-  assert.match(payload.blocks[0].text.text, /Calypso help/);
+  assert.match(payload.text, /\/conductor status/);
+  assert.match(payload.blocks[0].text.text, /Code Conductor help/);
 });
 
 test("confirmed production deploy posts its announcement publicly to the Slack channel", async () => {

@@ -111,7 +111,7 @@ test("handleCalypsoCommand rejects invalid email on call duration", () => {
   });
 
   assert.equal(result.action, "respond");
-  assert.match(result.responseText, /\/calypso config email-on-call <@USER\|USER_ID> <Nh\|Nd\|Nw>/);
+  assert.match(result.responseText, /\/conductor config email-on-call <@USER\|USER_ID> <Nh\|Nd\|Nw>/);
 });
 
 test("registerCalypsoCommand emails command lists pending support emails", async () => {

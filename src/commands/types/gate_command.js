@@ -26,9 +26,9 @@ class GateCommand extends BaseCalypsoCommand {
 
     return this.buildRespondParsedCommand([
       "Usage:",
-      "`/calypso gate status [prod|staging]`",
-      "`/calypso gate open <prod|staging>`",
-      "`/calypso gate close <prod|staging> <REASON>`",
+      "`/conductor gate status [prod|staging]`",
+      "`/conductor gate open <prod|staging>`",
+      "`/conductor gate close <prod|staging> <REASON>`",
     ].join("\n"));
   }
 
@@ -130,7 +130,7 @@ function buildGatePresentation(state, environment, { topicMirrored = null } = {}
       ? state.topicFallback
         ? `The channel-topic fallback is ${status}.`
         : `The authoritative gate is ${status}.`
-      : "No explicit state has been set; Calypso will use the channel topic.",
+      : "No explicit state has been set; Code Conductor will use the channel topic.",
     facts: [
       { label: "State", value: status },
       ...(state?.changed_by ? [{ label: "Changed by", value: state.changed_by }] : []),

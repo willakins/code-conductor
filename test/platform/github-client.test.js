@@ -205,7 +205,7 @@ function buildClientOptions(overrides = {}) {
     apiBaseUrl: "https://api.github.com",
     apiMaxPages: 100,
     apiPageSize: 100,
-    apiUserAgent: "calypso-bot",
+    apiUserAgent: "code-conductor-bot",
     apiVersion: "2022-11-28",
     token: "ghp-token",
     ...overrides,

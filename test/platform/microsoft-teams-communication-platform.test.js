@@ -11,7 +11,7 @@ const {
 test("microsoft teams platform registers command route and responds", async () => {
   const platform = new MicrosoftTeamsCommunicationPlatform({
     config: {
-      botName: "Calypso",
+      botName: "Code Conductor",
       communicationAdminUserIds: ["UADMIN"],
     },
   });
@@ -36,7 +36,7 @@ test("microsoft teams platform registers command route and responds", async () =
   await routes[0].handler(
     {
       body: {
-        text: "/calypso help",
+        text: "/conductor help",
         from: {
           id: "U123",
           name: "will.akins",
@@ -48,11 +48,11 @@ test("microsoft teams platform registers command route and responds", async () =
   );
 
   assert.equal(response.statusCode, 200);
-  assert.match(response.payload.text, /\/calypso help/);
+  assert.match(response.payload.text, /\/conductor help/);
   assert.equal(response.payload.attachments.length, 1);
   assert.match(
     JSON.stringify(response.payload.attachments[0].content.body),
-    /Calypso help/,
+    /Code Conductor help/,
   );
   assert.equal(await platform.resolveUserDisplayName("U123"), "will.akins");
   assert.equal(await platform.isWorkspaceAdmin("UADMIN"), true);
@@ -61,7 +61,7 @@ test("microsoft teams platform registers command route and responds", async () =
 
 test("microsoft teams platform accepts Adaptive Card submitted commands", async () => {
   const platform = new MicrosoftTeamsCommunicationPlatform({
-    config: { botName: "Calypso" },
+    config: { botName: "Code Conductor" },
   });
   platform.registerCalypsoCommand({ pool: {} });
   const routes = [];
@@ -84,13 +84,13 @@ test("microsoft teams platform accepts Adaptive Card submitted commands", async 
   );
 
   assert.equal(response.statusCode, 200);
-  assert.match(response.payload.text, /\/calypso status/);
+  assert.match(response.payload.text, /\/conductor status/);
 });
 
 test("microsoft teams platform renders status as an adaptive card", async () => {
   const platform = new MicrosoftTeamsCommunicationPlatform({
     config: {
-      botName: "Calypso",
+      botName: "Code Conductor",
     },
   });
   platform.registerCalypsoCommand({
@@ -120,7 +120,7 @@ test("microsoft teams platform renders status as an adaptive card", async () => 
   await routes[0].handler(
     {
       body: {
-        text: "/calypso status",
+        text: "/conductor status",
         from: {
           id: "U123",
           name: "Will",
@@ -213,7 +213,7 @@ test("microsoft teams platform strips configured bot prefix", async () => {
 test("microsoft teams platform returns deploy prod tip for matching text", async () => {
   const platform = new MicrosoftTeamsCommunicationPlatform({
     config: {
-      botName: "Calypso",
+      botName: "Code Conductor",
     },
   });
   platform.registerCalypsoCommand({

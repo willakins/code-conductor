@@ -30,8 +30,8 @@ class MustTestCommand extends BaseCalypsoCommand {
     return this.buildRespondParsedCommand(
       [
         "Usage:",
-        "`/calypso must-test <PR_NUMBER>`",
-        "`/calypso must-test off <PR_NUMBER>`",
+        "`/conductor must-test <PR_NUMBER>`",
+        "`/conductor must-test off <PR_NUMBER>`",
       ].join("\n"),
     );
   }
@@ -49,7 +49,7 @@ class MustTestCommand extends BaseCalypsoCommand {
         [
           "Must-test update denied.",
           "Only workspace admins or whitelisted users can manage force-deploy test requirements.",
-          "Ask a workspace admin to run `/calypso whitelist <@USER>`.",
+          "Ask a workspace admin to run `/conductor whitelist <@USER>`.",
         ].join("\n"),
       );
     }

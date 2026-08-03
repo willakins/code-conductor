@@ -50,10 +50,10 @@ class DeployCommand extends BaseCalypsoCommand {
       return this.buildRespondParsedCommand(
         [
           "Usage:",
-          "`/calypso deploy`",
-          "`/calypso deploy staging`",
-          "`/calypso deploy prod`",
-          "`/calypso deploy list`",
+          "`/conductor deploy`",
+          "`/conductor deploy staging`",
+          "`/conductor deploy prod`",
+          "`/conductor deploy list`",
         ].join("\n"),
       );
     }
@@ -71,7 +71,7 @@ class DeployCommand extends BaseCalypsoCommand {
         [
           "Deploy denied.",
           "Only workspace admins or whitelisted users can deploy.",
-          "Ask a workspace admin to run `/calypso whitelist <@USER>`.",
+          "Ask a workspace admin to run `/conductor whitelist <@USER>`.",
         ].join("\n"),
       );
     }
@@ -261,7 +261,7 @@ class DeployCommand extends BaseCalypsoCommand {
         : "";
       const missingDeploymentIdText =
         isProductionDeploy && !externalDeploymentId
-          ? "Calypso will not mark PRs deployed automatically because the deploy provider did not return a deployment id."
+          ? "Code Conductor will not mark PRs deployed automatically because the deploy provider did not return a deployment id."
           : "";
 
       if (!isProductionDeploy) {
@@ -323,7 +323,7 @@ class DeployCommand extends BaseCalypsoCommand {
           [
             `Deploy to ${deployEnvironment} was accepted by the provider`,
             externalDeploymentId ? `(id: ${externalDeploymentId}).` : "without a deployment id.",
-            `Calypso hit a post-trigger tracking error: ${error.message}`,
+            `Code Conductor hit a post-trigger tracking error: ${error.message}`,
           ].join(" "),
           this.buildDeploymentExecutionFields({
             deploymentRunId: deploymentRun?.id || null,
@@ -345,12 +345,12 @@ class DeployCommand extends BaseCalypsoCommand {
             presentation: {
               tone: "warning",
               title: `${formatEnvironmentLabel(deployEnvironment)} deployment accepted`,
-              summary: "The provider accepted the deployment, but Calypso could not finish post-trigger bookkeeping.",
+              summary: "The provider accepted the deployment, but Code Conductor could not finish post-trigger bookkeeping.",
               facts: [
                 { label: "Deployment ID", value: externalDeploymentId || "not returned" },
                 { label: "Run", value: String(deploymentRun?.id || "reserved") },
               ],
-              context: "Concurrency protection remains active while Calypso monitors or the reservation lease expires.",
+              context: "Concurrency protection remains active while Code Conductor monitors or the reservation lease expires.",
             },
           }),
         );
@@ -418,7 +418,7 @@ class DeployCommand extends BaseCalypsoCommand {
             )
           : []),
         ...(onlyPullRequestBlockers
-          ? ["Mark them tested with `/calypso tested <PR_NUMBER>` or clear the requirement with `/calypso must-test off <PR_NUMBER>`."]
+          ? ["Mark them tested with `/conductor tested <PR_NUMBER>` or clear the requirement with `/conductor must-test off <PR_NUMBER>`."]
           : []),
       ].join("\n"),
       {
@@ -773,9 +773,9 @@ function buildDeploymentStartedPresentation({
     ],
     sections,
     context: missingDeploymentIdText
-      ? "Calypso will not update deployment state automatically."
+      ? "Code Conductor will not update deployment state automatically."
       : shouldNotifyDeploymentCompletion
-        ? "Calypso will post again when the provider reports completion."
+        ? "Code Conductor will post again when the provider reports completion."
         : "The deployment was handed off to the configured provider.",
   };
 }
@@ -821,8 +821,8 @@ function buildDeploymentNotConfiguredPresentation(deployEnvironment) {
     tone: "warning",
     title: `${environmentLabel} deployment is not configured`,
     summary: deployEnvironment === "prod"
-      ? "The deploy gate is clear, but Calypso cannot start production."
-      : "Calypso cannot start a staging deployment.",
+      ? "The deploy gate is clear, but Code Conductor cannot start production."
+      : "Code Conductor cannot start a staging deployment.",
     facts: [
       {
         label: "Environment",

@@ -81,13 +81,13 @@ stop_remaining_calypso_node_processes() {
     [[ -z "$pid" ]] && continue
     found_node_process="true"
     if kill -0 "$pid" >/dev/null 2>&1; then
-      echo "Stopping additional Calypso node process (pid $pid)"
+      echo "Stopping additional Code Conductor node process (pid $pid)"
       stop_process_by_pid "$pid"
     fi
   done < <(find_calypso_node_process_ids | sort -u)
 
   if [[ "$found_node_process" == "false" ]]; then
-    echo "No additional Calypso node processes found"
+    echo "No additional Code Conductor node processes found"
   fi
 }
 
@@ -132,7 +132,7 @@ main() {
   delete_temporary_runtime_files
 
   echo
-  echo "Calypso stack stopped and temporary Postgres data removed."
+  echo "Code Conductor stack stopped and temporary Postgres data removed."
 }
 
 main "$@"
