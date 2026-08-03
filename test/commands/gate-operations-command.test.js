@@ -52,7 +52,7 @@ test("gate close persists an audited reason and announces the transition", async
   assert.match(payload.text, /gate closed by UADMIN/);
   assert.equal(writes[0].status, "closed");
   assert.equal(writes[0].reason, "Incident in progress");
-  assert.ok(payload.blocks.some((block) => block.type === "actions"));
+  assert.ok(readSlackBlocks(payload).some((block) => block.type === "actions"));
 });
 
 test("history renders audited gate and deployment events", async () => {
@@ -84,7 +84,7 @@ test("history renders audited gate and deployment events", async () => {
   });
 
   const payload = await runCommand(handler, "history prod");
-  const eventBlocks = payload.blocks.filter(
+  const eventBlocks = readSlackBlocks(payload).filter(
     (block) =>
       block.type === "section"
       && block.text?.text.includes("Production deployment run #1"),
@@ -110,7 +110,7 @@ test("gate status reports the actual channel-topic fallback", async () => {
   const payload = await runCommand(handler, "gate status prod");
 
   assert.match(payload.text, /gate is closed from the channel-topic fallback/);
-  assert.match(JSON.stringify(payload.blocks), /channel-topic fallback is closed/);
+  assert.match(JSON.stringify(readSlackBlocks(payload)), /channel-topic fallback is closed/);
 });
 
 test("doctor renders operational checks without leaking secrets", async () => {
@@ -126,7 +126,7 @@ test("doctor renders operational checks without leaking secrets", async () => {
   const payload = await runCommand(handler, "doctor");
 
   assert.match(payload.text, /1 Code Conductor diagnostic check/);
-  assert.match(JSON.stringify(payload.blocks), /Target missing/);
+  assert.match(JSON.stringify(readSlackBlocks(payload)), /Target missing/);
 });
 
 test("explicit open gate overrides a red fallback topic in status", async () => {
@@ -153,8 +153,8 @@ test("explicit open gate overrides a red fallback topic in status", async () => 
     },
   });
 
-  assert.match(payload.blocks[0].text.text, /Production deploy is clear/);
-  assert.match(JSON.stringify(payload.blocks), /Open \(explicit\)/);
+  assert.match(readSlackBlocks(payload)[0].text.text, /Production readiness/);
+  assert.match(JSON.stringify(readSlackBlocks(payload)), /Ready to deploy/);
 });
 
 test("active deployment blocks a second deploy before provider trigger", async () => {
@@ -213,7 +213,7 @@ test("production deploy bypasses ordinary untested PRs", async () => {
   const payload = await runCommand(handler, "deploy prod");
 
   assert.match(payload.text, /ready for confirmation/);
-  assert.match(JSON.stringify(payload.blocks), /deploy prod confirm confirm-token/);
+  assert.match(JSON.stringify(readSlackBlocks(payload)), /deploy prod confirm confirm-token/);
   assert.doesNotMatch(payload.text, /Deploy blocked due to untested PRs/);
   assert.deepEqual(deploymentPlanOptions, { includeUntested: true });
 });
@@ -274,7 +274,7 @@ test("Slack action values execute through the same command router", async () => 
   });
 
   assert.match(payload.text, /\/conductor status/);
-  assert.match(payload.blocks[0].text.text, /Code Conductor help/);
+  assert.match(readSlackBlocks(payload)[0].text.text, /Code Conductor help/);
 });
 
 test("confirmed production deploy posts its announcement publicly to the Slack channel", async () => {
@@ -316,7 +316,7 @@ test("confirmed production deploy posts its announcement publicly to the Slack c
   assert.equal(actionResponses.length, 1);
   assert.equal(actionResponses[0].response_type, "in_channel");
   assert.equal(actionResponses[0].replace_original, false);
-  assert.match(actionResponses[0].blocks[0].text.text, /Production deployment started/);
+  assert.match(readSlackBlocks(actionResponses[0])[0].text.text, /Production deployment started/);
 });
 
 test("production deploy requires a user-bound server-side confirmation", async () => {
@@ -349,7 +349,7 @@ test("production deploy requires a user-bound server-side confirmation", async (
   const preview = await runCommand(handler, "deploy prod");
   assert.equal(triggerCount, 0);
   assert.match(preview.text, /ready for confirmation/);
-  assert.match(JSON.stringify(preview.blocks), /deploy prod confirm confirm-token/);
+  assert.match(JSON.stringify(readSlackBlocks(preview)), /deploy prod confirm confirm-token/);
 
   const confirmed = await runCommand(handler, "deploy prod confirm confirm-token");
   assert.equal(triggerCount, 1);
@@ -386,3 +386,7 @@ test("post-trigger bookkeeping failures do not release the active deployment run
   assert.match(payload.text, /post-trigger tracking error/);
   assert.equal(completed, false);
 });
+
+function readSlackBlocks(message) {
+  return message.attachments[0].blocks;
+}

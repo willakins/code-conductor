@@ -5,22 +5,27 @@ const MAX_ITEMS_PER_PRESENTATION_SECTION = 40;
 const TONE_STYLES = {
   danger: {
     icon: "⛔",
+    slackColor: "#E01E5A",
     teamsColor: "Attention",
   },
   info: {
     icon: "🚀",
+    slackColor: "#36C5F0",
     teamsColor: "Accent",
   },
   neutral: {
-    icon: "🌊",
+    icon: "🎛️",
+    slackColor: "#6B7280",
     teamsColor: "Default",
   },
   success: {
     icon: "✅",
+    slackColor: "#2EB67D",
     teamsColor: "Good",
   },
   warning: {
     icon: "⚠️",
+    slackColor: "#ECB22E",
     teamsColor: "Warning",
   },
 };
@@ -41,42 +46,54 @@ function buildCommunicationMessage({ provider, text, presentation }) {
     };
   }
 
+  const toneStyle = resolveToneStyle(normalizedPresentation.tone);
   return {
     ...payload,
-    blocks: buildSlackBlocks(normalizedPresentation),
+    attachments: [{
+      color: toneStyle.slackColor,
+      fallback: normalizedPresentation.title,
+      blocks: buildSlackBlocks(normalizedPresentation),
+    }],
   };
 }
 
 function buildSlackBlocks(presentation) {
   const toneStyle = resolveToneStyle(presentation.tone);
+  const showHeaderIcon = presentation.showHeaderIcon || !presentation.status;
   const blocks = [
     {
       type: "header",
       text: {
         type: "plain_text",
-        text: `${toneStyle.icon} ${presentation.title}`.slice(0, 150),
+        text: `${showHeaderIcon ? `${toneStyle.icon} ` : ""}${presentation.title}`.slice(0, 150),
         emoji: true,
       },
     },
   ];
 
+  if (presentation.status) {
+    blocks.push(buildSlackStatus(presentation.status));
+  }
+
   if (presentation.summary) {
     blocks.push(buildSlackSection(presentation.summary));
   }
 
-  if (presentation.facts.length > 0) {
-    blocks.push({
-      type: "section",
-      fields: presentation.facts.slice(0, 10).map((fact) => ({
-        type: "mrkdwn",
-        text: `*${fact.label}*\n${fact.value}`.slice(0, 2000),
-      })),
-    });
+  if (presentation.facts.length > 0 && presentation.factsPosition !== "after_sections") {
+    if (presentation.factsSeparator) blocks.push({ type: "divider" });
+    blocks.push(buildSlackFactsBlock(presentation.facts));
   }
 
   for (const section of presentation.sections) {
     if (section.separator) {
       blocks.push({ type: "divider" });
+    }
+    if (section.layout === "rows") {
+      if (section.title || section.text) {
+        blocks.push(buildSlackSection(formatSlackSectionText(section, [])));
+      }
+      blocks.push(...section.items.map(buildSlackRow));
+      continue;
     }
     const itemGroups = chunk(section.items, MAX_ITEMS_PER_SECTION);
     if (itemGroups.length === 0) {
@@ -100,33 +117,30 @@ function buildSlackBlocks(presentation) {
     });
   }
 
-  if (presentation.actions.length > 0) {
-    blocks.push({
+  if (presentation.facts.length > 0 && presentation.factsPosition === "after_sections") {
+    if (presentation.factsSeparator) blocks.push({ type: "divider" });
+    blocks.push(buildSlackFactsBlock(presentation.facts));
+  }
+
+  const trailingBlocks = [];
+  const useCompactFooter = presentation.compactFooter
+    && presentation.actions.length === 1
+    && presentation.context;
+  if (useCompactFooter) {
+    trailingBlocks.push({ type: "divider" });
+    trailingBlocks.push(buildSlackCompactFooter(
+      presentation.context,
+      presentation.actions[0],
+    ));
+  } else if (presentation.actions.length > 0) {
+    trailingBlocks.push({
       type: "actions",
-      elements: presentation.actions.slice(0, 5).map((action) => ({
-        type: "button",
-        action_id: `calypso:${action.id}`.slice(0, 255),
-        text: { type: "plain_text", text: action.label.slice(0, 75), emoji: true },
-        ...(action.url ? { url: action.url } : { value: action.command }),
-        ...(action.style === "primary" || action.style === "danger"
-          ? { style: action.style }
-          : {}),
-        ...(action.confirm
-          ? {
-              confirm: {
-                title: { type: "plain_text", text: "Confirm action" },
-                text: { type: "mrkdwn", text: action.confirm },
-                confirm: { type: "plain_text", text: "Continue" },
-                deny: { type: "plain_text", text: "Cancel" },
-              },
-            }
-          : {}),
-      })),
+      elements: presentation.actions.slice(0, 5).map(buildSlackButton),
     });
   }
 
-  if (presentation.context) {
-    blocks.push({
+  if (presentation.context && !useCompactFooter) {
+    trailingBlocks.push({
       type: "context",
       elements: [
         {
@@ -137,21 +151,37 @@ function buildSlackBlocks(presentation) {
     });
   }
 
-  return blocks.slice(0, 50);
+  return fitSlackBlocks(blocks, trailingBlocks);
 }
 
 function buildTeamsAdaptiveCard(presentation) {
   const toneStyle = resolveToneStyle(presentation.tone);
+  const showHeaderIcon = presentation.showHeaderIcon || !presentation.status;
   const body = [
     {
       type: "TextBlock",
-      text: `${toneStyle.icon} ${presentation.title}`,
+      text: `${showHeaderIcon ? `${toneStyle.icon} ` : ""}${presentation.title}`,
       size: "Large",
       weight: "Bolder",
       color: toneStyle.teamsColor,
       wrap: true,
     },
   ];
+
+  if (presentation.status) {
+    const statusStyle = resolveToneStyle(presentation.status.tone);
+    body.push({
+      type: "TextBlock",
+      text: [
+        `${presentation.status.showIcon ? `${statusStyle.icon} ` : ""}**${presentation.status.label}**`,
+        presentation.status.detail,
+      ].filter(Boolean).join("  •  "),
+      color: statusStyle.teamsColor,
+      weight: "Bolder",
+      wrap: true,
+      spacing: "Small",
+    });
+  }
 
   if (presentation.summary) {
     body.push({
@@ -162,15 +192,8 @@ function buildTeamsAdaptiveCard(presentation) {
     });
   }
 
-  if (presentation.facts.length > 0) {
-    body.push({
-      type: "FactSet",
-      facts: presentation.facts.map((fact) => ({
-        title: fact.label,
-        value: convertSlackMarkupToTeams(fact.value),
-      })),
-      separator: true,
-    });
+  if (presentation.facts.length > 0 && presentation.factsPosition !== "after_sections") {
+    body.push(buildTeamsFactsBlock(presentation.facts));
   }
 
   for (const section of presentation.sections) {
@@ -203,6 +226,10 @@ function buildTeamsAdaptiveCard(presentation) {
         })),
       ].filter(Boolean),
     });
+  }
+
+  if (presentation.facts.length > 0 && presentation.factsPosition === "after_sections") {
+    body.push(buildTeamsFactsBlock(presentation.facts));
   }
 
   if (presentation.actions.length > 0) {
@@ -256,6 +283,110 @@ function buildSlackSection(text) {
   };
 }
 
+function buildSlackStatus(status) {
+  const toneStyle = resolveToneStyle(status.tone);
+  return buildSlackSection([
+    `${status.showIcon ? `${toneStyle.icon} ` : ""}*${status.label}*`,
+    status.detail,
+  ].filter(Boolean).join("  •  "));
+}
+
+function buildSlackFactsBlock(facts) {
+  return {
+    type: "section",
+    fields: facts.slice(0, 10).map((fact) => ({
+      type: "mrkdwn",
+      text: formatSlackFact(fact).slice(0, 2000),
+    })),
+  };
+}
+
+function buildSlackCompactFooter(context, action) {
+  return {
+    type: "section",
+    text: { type: "mrkdwn", text: context.slice(0, 3000) },
+    accessory: buildSlackButton(action),
+  };
+}
+
+function buildSlackButton(action) {
+  return {
+    type: "button",
+    action_id: `calypso:${action.id}`.slice(0, 255),
+    text: { type: "plain_text", text: action.label.slice(0, 75), emoji: true },
+    ...(action.url ? { url: action.url } : { value: action.command }),
+    ...(action.style === "primary" || action.style === "danger"
+      ? { style: action.style }
+      : {}),
+    ...(action.confirm
+      ? {
+          confirm: {
+            title: { type: "plain_text", text: "Confirm action" },
+            text: { type: "mrkdwn", text: action.confirm },
+            confirm: { type: "plain_text", text: "Continue" },
+            deny: { type: "plain_text", text: "Cancel" },
+          },
+        }
+      : {}),
+  };
+}
+
+function buildTeamsFactsBlock(facts) {
+  return {
+    type: "FactSet",
+    facts: facts.map((fact) => ({
+      title: fact.label,
+      value: formatTeamsFact(fact),
+    })),
+    separator: true,
+  };
+}
+
+function fitSlackBlocks(contentBlocks, trailingBlocks) {
+  const maxContentBlockCount = Math.max(50 - trailingBlocks.length, 0);
+  if (contentBlocks.length <= maxContentBlockCount) {
+    return [...contentBlocks, ...trailingBlocks];
+  }
+
+  const omissionNotice = buildSlackSection("_Additional rows were omitted to keep this card actionable._");
+  return [
+    ...contentBlocks.slice(0, Math.max(maxContentBlockCount - 1, 0)),
+    ...(maxContentBlockCount > 0 ? [omissionNotice] : []),
+    ...trailingBlocks,
+  ].slice(0, 50);
+}
+
+function buildSlackRow(item) {
+  const title = item.url
+    ? `<${sanitizeSlackUrl(item.url)}|${sanitizeSlackLinkLabel(item.title)}>`
+    : item.title;
+  const primaryText = [
+    [item.icon, title].filter(Boolean).join(" "),
+    item.description ? `_${item.description}_` : "",
+  ].filter(Boolean).join("\n");
+  const fields = [{ type: "mrkdwn", text: primaryText.slice(0, 2000) }];
+
+  if (item.status) {
+    const statusStyle = resolveToneStyle(item.statusTone);
+    fields.push({
+      type: "mrkdwn",
+      text: `${statusStyle.icon} *${item.status}*`.slice(0, 2000),
+    });
+  }
+
+  return { type: "section", fields };
+}
+
+function formatSlackFact(fact) {
+  const tonePrefix = fact.tone ? `${resolveToneStyle(fact.tone).icon} ` : "";
+  return `*${fact.label}*\n${tonePrefix}${fact.value}`;
+}
+
+function formatTeamsFact(fact) {
+  const tonePrefix = fact.tone ? `${resolveToneStyle(fact.tone).icon} ` : "";
+  return `${tonePrefix}${convertSlackMarkupToTeams(fact.value)}`;
+}
+
 function formatSlackSectionText(section, items) {
   return [
     section.title ? `*${section.title}*` : "",
@@ -268,10 +399,17 @@ function formatSlackItem(item) {
   const title = item.url
     ? `<${sanitizeSlackUrl(item.url)}|${sanitizeSlackLinkLabel(item.title)}>`
     : item.title;
+  const titleWithIcon = [item.icon, title].filter(Boolean).join(" ");
+  const status = item.status
+    ? `${resolveToneStyle(item.statusTone).icon} ${item.status}`
+    : "";
   if (item.inlineDescription && item.description) {
-    return `• ${title} ${item.description}`;
+    return `• ${titleWithIcon} ${item.description}${status ? ` · ${status}` : ""}`;
   }
-  return [`• ${title}`, item.description ? `  ${item.description}` : ""]
+  return [
+    `• ${titleWithIcon}${status ? ` — ${status}` : ""}`,
+    item.description ? `  ${item.description}` : "",
+  ]
     .filter(Boolean)
     .join("\n");
 }
@@ -280,10 +418,19 @@ function formatTeamsItem(item) {
   const title = item.url
     ? `[${escapeTeamsLinkLabel(item.title)}](${item.url})`
     : item.title;
+  const titleWithIcon = [item.icon, title].filter(Boolean).join(" ");
+  const status = item.status
+    ? `${resolveToneStyle(item.statusTone).icon} ${item.status}`
+    : "";
   if (item.inlineDescription && item.description) {
-    return `• ${title} ${convertSlackMarkupToTeams(item.description)}`;
+    return `• ${titleWithIcon} ${convertSlackMarkupToTeams(item.description)}${
+      status ? ` · ${status}` : ""
+    }`;
   }
-  return [`• ${title}`, item.description ? `  ${convertSlackMarkupToTeams(item.description)}` : ""]
+  return [
+    `• ${titleWithIcon}${status ? ` — ${status}` : ""}`,
+    item.description ? `  ${convertSlackMarkupToTeams(item.description)}` : "",
+  ]
     .filter(Boolean)
     .join("\n");
 }
@@ -301,11 +448,19 @@ function normalizePresentation(presentation) {
   return {
     title,
     tone: normalizeText(presentation.tone) || "info",
+    compactFooter: presentation.compactFooter === true,
+    factsSeparator: presentation.factsSeparator === true,
+    factsPosition: normalizeText(presentation.factsPosition) === "after_sections"
+      ? "after_sections"
+      : "before_sections",
+    showHeaderIcon: presentation.showHeaderIcon === true,
     summary: normalizeText(presentation.summary),
+    status: normalizePresentationStatus(presentation.status),
     context: normalizeText(presentation.context),
     facts: (Array.isArray(presentation.facts) ? presentation.facts : [])
       .map((fact) => ({
         label: normalizeText(fact?.label),
+        tone: normalizeText(fact?.tone),
         value: normalizeText(fact?.value),
       }))
       .filter((fact) => fact.label && fact.value),
@@ -321,6 +476,7 @@ function normalizePresentation(presentation) {
       .filter((action) => action.label && (action.command || action.url)),
     sections: (Array.isArray(presentation.sections) ? presentation.sections : [])
       .map((section) => ({
+        layout: normalizeText(section?.layout) === "rows" ? "rows" : "list",
         title: normalizeText(section?.title),
         text: normalizeText(section?.text),
         separator: section?.separator !== false,
@@ -330,13 +486,34 @@ function normalizePresentation(presentation) {
   };
 }
 
+function normalizePresentationStatus(status) {
+  if (!status || typeof status !== "object") {
+    return null;
+  }
+
+  const label = normalizeText(status.label);
+  if (!label) {
+    return null;
+  }
+
+  return {
+    detail: normalizeText(status.detail),
+    label,
+    showIcon: status.showIcon !== false,
+    tone: normalizeText(status.tone) || "info",
+  };
+}
+
 function normalizePresentationItems(items) {
   const normalizedItems = (Array.isArray(items) ? items : [])
     .map((item) => ({
+      icon: normalizeText(item?.icon),
       title: normalizeText(item?.title),
       url: normalizeText(item?.url),
       description: normalizeText(item?.description),
       inlineDescription: item?.inlineDescription === true,
+      status: normalizeText(item?.status),
+      statusTone: normalizeText(item?.statusTone) || "neutral",
     }))
     .filter((item) => item.title);
   const omittedItemCount = normalizedItems.length - MAX_ITEMS_PER_PRESENTATION_SECTION;

@@ -530,8 +530,8 @@ test("registerCalypsoCommand registers /conductor and responds ephemerally", asy
   assert.match(payload.text, /\/conductor status/);
   assert.match(payload.text, /Modules/);
   assert.match(payload.text, /\/conductor help monitoring/);
-  assert.match(payload.blocks[0].text.text, /Code Conductor help/);
-  assert.ok(payload.blocks.some((block) => block.type === "divider"));
+  assert.match(readSlackBlocks(payload)[0].text.text, /Code Conductor help/);
+  assert.ok(readSlackBlocks(payload).some((block) => block.type === "divider"));
 });
 
 test("registerCalypsoCommand runs sync command and returns summary", async () => {
@@ -699,6 +699,88 @@ test("registerCalypsoCommand handles status with injected db functions", async (
   assert.match(payload.text, /2026-02-13 22:00:17 UTC/);
 });
 
+test("registerCalypsoCommand renders a focused production readiness card for must-test blockers", async () => {
+  let commandHandler;
+  const app = {
+    command(_name, handler) {
+      commandHandler = handler;
+    },
+  };
+  const mustTestPullRequest = {
+    repo: "acme/storefront",
+    pr_number: 187,
+    title: "Add billing webhooks",
+    url: "https://github.com/acme/storefront/pull/187",
+    status: "untested",
+    force_deploy_blocked: true,
+  };
+  const ordinaryUntestedPullRequest = {
+    repo: "acme/storefront",
+    pr_number: 190,
+    title: "Update tax calculations",
+    url: "https://github.com/acme/storefront/pull/190",
+    status: "untested",
+    force_deploy_blocked: false,
+  };
+
+  registerCalypsoCommand(app, {
+    pool: {},
+    getEnvironmentStatusConfigFn: async () => ({
+      enabled: true,
+      lastCheckedAt: new Date("2026-08-03T16:40:00.000Z"),
+      lastHttpStatus: 200,
+      lastObservedState: "healthy",
+    }),
+    getLastProdDeployAtFn: async () => "2026-08-03T14:42:00.000Z",
+    listBlockingPullRequestsFn: async () => [mustTestPullRequest, ordinaryUntestedPullRequest],
+    listDeployablePullRequestsForDeploymentFn: async () => [
+      {
+        repo: "acme/storefront",
+        pr_number: 184,
+        title: "Checkout retry handling",
+        url: "https://github.com/acme/storefront/pull/184",
+        status: "tested",
+      },
+      mustTestPullRequest,
+      ordinaryUntestedPullRequest,
+    ],
+    readTimeFormatPreferenceFn: async () => "long",
+    readTimeZonePreferenceFn: async () => "UTC",
+  });
+
+  let payload;
+  await commandHandler({
+    command: { text: "status", user_id: "U123" },
+    ack: async () => {},
+    respond: async (message) => {
+      payload = message;
+    },
+  });
+
+  assert.equal(payload.response_type, "ephemeral");
+  const blocks = readSlackBlocks(payload);
+  assert.equal(blocks[0].text.text, "⛔ Production readiness");
+  assert.equal(blocks[1].text.text, "*Blocked*  •  1 required test");
+  const factsBlockIndex = blocks.findIndex((block) =>
+    block.type === "section"
+      && block.fields?.some((field) => field.text.includes("Production app")),
+  );
+  assert.equal(blocks[factsBlockIndex - 1].type, "divider");
+  assert.match(blocks[factsBlockIndex].fields[0].text, /✅ Healthy at last check · HTTP 200/);
+  assert.match(blocks[factsBlockIndex].fields[1].text, /🕒 2026-08-03 14:42:00 UTC/);
+  const actions = blocks.find((block) => block.type === "actions");
+  assert.deepEqual(
+    actions.elements.map((action) => action.text.text),
+    [
+      "View PR #187",
+      "Deployment history",
+      "Mark #187 tested",
+      "Mark #190 tested",
+      "Refresh",
+    ],
+  );
+});
+
 test("registerCalypsoCommand status reports a production red channel topic", async () => {
   let commandHandler;
   const app = {
@@ -740,11 +822,10 @@ test("registerCalypsoCommand status reports a production red channel topic", asy
 
   assert.match(payload.text, /Production deployment is blocked by the channel topic/);
   assert.match(payload.text, /No must-test PR blockers since last prod deploy/);
-  assert.match(payload.blocks[0].text.text, /Production deploy is blocked/);
-  const renderedBlocks = JSON.stringify(payload.blocks);
-  assert.match(renderedBlocks, /Channel topic/);
+  assert.match(readSlackBlocks(payload)[0].text.text, /Production readiness/);
+  const renderedBlocks = JSON.stringify(readSlackBlocks(payload));
   assert.match(renderedBlocks, /Blocked/);
-  assert.match(renderedBlocks, /Must-test PRs/);
+  assert.match(renderedBlocks, /Deployment gate closed/);
   assert.match(renderedBlocks, /Change the channel's Production topic marker from red/);
 });
 
@@ -790,6 +871,15 @@ test("registerCalypsoCommand shows open waiting reviews without filters", async 
   assert.match(payload.text, /review: waiting/);
   assert.match(payload.text, /codex: not approved/);
   assert.match(payload.text, /Last modified: 2\/13\/2026/);
+  const reviewBlocks = payload.attachments[0].blocks;
+  assert.match(reviewBlocks[0].text.text, /Pull request review queue/);
+  assert.match(JSON.stringify(reviewBlocks), /1 open/);
+  assert.match(JSON.stringify(reviewBlocks), /1 needs attention/);
+  const reviewRow = reviewBlocks.find((block) =>
+    block.type === "section" && block.fields?.some((field) => field.text.includes("#55")),
+  );
+  assert.match(reviewRow.fields[0].text, /#55  Add observability/);
+  assert.match(reviewRow.fields[1].text, /Review requested/);
 });
 
 test("registerCalypsoCommand filters waiting reviews by github user", async () => {
@@ -1386,7 +1476,7 @@ test("registerCalypsoCommand blocks staging deploy when channel topic marks stag
   assert.equal(payload.response_type, "ephemeral");
   assert.match(payload.text, /Cannot deploy to staging from this channel right now/);
   assert.match(payload.text, /Channel topic indicates deploy is not allowed/);
-  assert.match(payload.blocks[0].text.text, /Staging deployment unavailable/);
+  assert.match(readSlackBlocks(payload)[0].text.text, /Staging deployment unavailable/);
   assert.equal(deployTriggered, false);
 });
 
@@ -1499,7 +1589,7 @@ test("registerCalypsoCommand triggers staging deploy without deploy-gate transac
   assert.match(payload.text, /Deploy to staging is in progress \(id: dep-stg-123\)/);
   assert.match(payload.text, /Triggered by <@U123>/);
   assert.match(
-    payload.blocks.find((block) => block.type === "context").elements[0].text,
+    readSlackBlocks(payload).find((block) => block.type === "context").elements[0].text,
     /handed off to the configured provider/,
   );
   assert.deepEqual(queryCalls, []);
@@ -1619,8 +1709,14 @@ test("registerCalypsoCommand sends staging deployment completion follow-up with 
     responses[1].text,
     /Deployment dep-stg-abc finished successfully with phase ACTIVE/,
   );
-  assert.match(responses[0].blocks[0].text.text, /Staging deployment started/);
-  assert.match(responses[1].blocks[0].text.text, /Staging deployment complete/);
+  assert.match(readSlackBlocks(responses[0])[0].text.text, /Staging deployment started/);
+  const stagingCompletionBlocks = readSlackBlocks(responses[1]);
+  assert.match(stagingCompletionBlocks[0].text.text, /Staging deployment complete/);
+  assert.match(JSON.stringify(stagingCompletionBlocks), /Staging finished successfully/);
+  assert.match(JSON.stringify(stagingCompletionBlocks), /Deployment ID/);
+  assert.match(JSON.stringify(stagingCompletionBlocks), /Provider status/);
+  assert.doesNotMatch(JSON.stringify(stagingCompletionBlocks), /pull requests/);
+  assert.doesNotMatch(JSON.stringify(stagingCompletionBlocks), /Production health/);
   assert.equal(completionWaitConfig.deployTargetEnvironment, "staging");
   assert.equal(completionWaitConfig.deployProductionAppId, "app-id-staging");
 });
@@ -1698,6 +1794,12 @@ test("registerCalypsoCommand sends deployment completion follow-up when enabled"
       };
     },
     waitForProdDeployCompletionFn: async () => ({ id: "dep-abc", phase: "ACTIVE" }),
+    getEnvironmentStatusConfigFn: async () => ({
+      enabled: true,
+      lastCheckedAt: new Date("1970-01-01T00:00:00.000Z"),
+      lastHttpStatus: 200,
+      lastObservedState: "healthy",
+    }),
     listGithubSlackUserMappingsFn: async () => new Map([["octocat", "U123ABC"]]),
     deployConfig: {
       digitaloceanToken: "token",
@@ -1730,6 +1832,8 @@ test("registerCalypsoCommand sends deployment completion follow-up when enabled"
   assert.match(responses[1].text, /Marked 2 PR\(s\) deployed/);
   assert.match(responses[1].text, /Deployed PRs:/);
   assert.match(responses[1].text, /<https:\/\/github\.com\/croft-eng\/croft\/pull\/12\|Add deploy gate> by <@U123ABC> \(tested\)\./);
+  assert.match(JSON.stringify(readSlackBlocks(responses[1])), /Awaiting post-deploy check/);
+  assert.doesNotMatch(JSON.stringify(readSlackBlocks(responses[1])), /✅ Healthy/);
   assert.deepEqual(queryCalls, ["BEGIN", "COMMIT"]);
   assert.equal(insertedDeployment.externalDeployId, "dep-abc");
   assert.ok(insertedDeployment.deployedAt instanceof Date);
@@ -1805,9 +1909,9 @@ test("registerCalypsoCommand tags here when deployment completion fails", async 
     /<!here> Deployment dep-abc failed after trigger: deployment errored/,
   );
   assert.match(responses[1].text, /No deploy records or PR statuses were committed/);
-  assert.match(responses[1].blocks[0].text.text, /Deployment failed/);
+  assert.match(readSlackBlocks(responses[1])[0].text.text, /Deployment failed/);
   assert.match(
-    responses[1].blocks.find((block) => block.type === "context").elements[0].text,
+    readSlackBlocks(responses[1]).find((block) => block.type === "context").elements[0].text,
     /No deployment record or PR status was committed/,
   );
   assert.equal(inserted, false);
@@ -1902,7 +2006,7 @@ test("registerCalypsoCommand returns deploy not configured when clear", async ()
 
   assert.equal(payload.response_type, "ephemeral");
   assert.match(payload.text, /deploy not configured/i);
-  assert.match(payload.blocks[0].text.text, /Production deployment is not configured/);
+  assert.match(readSlackBlocks(payload)[0].text.text, /Production deployment is not configured/);
 });
 
 test("registerCalypsoCommand returns staging deploy not configured when staging app id is missing", async () => {
@@ -1934,7 +2038,7 @@ test("registerCalypsoCommand returns staging deploy not configured when staging 
 
   assert.equal(payload.response_type, "ephemeral");
   assert.match(payload.text, /Deploy to staging is not configured/);
-  assert.match(payload.blocks[0].text.text, /Staging deployment is not configured/);
+  assert.match(readSlackBlocks(payload)[0].text.text, /Staging deployment is not configured/);
 });
 
 test("registerCalypsoCommand triggers deploy and reports planned PRs when clear and configured", async () => {
@@ -3573,3 +3677,7 @@ test("registerCalypsoCommand config command updates error-tracking provider", as
   assert.equal(capturedCalls[0].provider, "rollbar");
   assert.equal(capturedCalls[0].updatedBy, "UADMIN");
 });
+
+function readSlackBlocks(message) {
+  return message.attachments[0].blocks;
+}

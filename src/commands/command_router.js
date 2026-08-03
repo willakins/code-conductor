@@ -166,7 +166,17 @@ async function sendDeploymentCompletionFollowUpIfNeeded({
   }
 
   try {
-    const { completionState, finalizationResult } = await completionWork;
+    const { completionState, deploymentRun, finalizationResult } = await completionWork;
+    const deployEnvironment =
+      executionResult.deployConfigOverrides?.deployTargetEnvironment || "prod";
+    const environmentStatus = deployEnvironment === "prod"
+      ? await calypsoCommandService.readEnvironmentStatus({
+        communicationClient,
+        deployConfig: executionResult.deployConfigOverrides || {},
+        deployProvider: executionResult.deployProvider,
+        userId,
+      }).catch(() => null)
+      : null;
 
     const successText = await buildDeploymentCompletionSuccessText({
       calypsoCommandService,
@@ -184,6 +194,8 @@ async function sendDeploymentCompletionFollowUpIfNeeded({
       text: successText,
       presentation: buildDeploymentCompletionSuccessPresentation({
         completionState,
+        deploymentRun,
+        environmentStatus,
         executionResult,
         externalDeploymentId,
         finalizationResult,
@@ -232,57 +244,126 @@ function buildCommandResponse({
 
 function buildDeploymentCompletionSuccessPresentation({
   completionState,
+  deploymentRun,
+  environmentStatus,
   executionResult,
   externalDeploymentId,
   finalizationResult,
 }) {
-  const completionPhase = completionState?.phase || completionState?.status || "unknown";
   const deployEnvironment =
     executionResult.deployConfigOverrides?.deployTargetEnvironment || "prod";
   const environmentLabel = deployEnvironment === "staging" ? "Staging" : "Production";
-  const deployedPullRequests = Array.isArray(finalizationResult?.deployedPullRequests)
-    ? finalizationResult.deployedPullRequests
-    : [];
+  const completionPhase = completionState?.phase || completionState?.status || "unknown";
+  if (deployEnvironment === "staging") {
+    return {
+      tone: "success",
+      title: "Staging deployment complete",
+      summary: "Staging finished successfully.",
+      facts: [
+        { label: "Deployment ID", value: externalDeploymentId },
+        { label: "Provider status", value: String(completionPhase) },
+      ],
+    };
+  }
+
+  const deployedPullRequestCount = Number(finalizationResult?.deployedPullRequestCount) || 0;
+  const completedRun = deploymentRun || finalizationResult?.deploymentRun || null;
+  const provider = completedRun?.provider || executionResult.deployProvider;
+  const duration = formatDeploymentDuration(
+    completedRun?.started_at,
+    completedRun?.completed_at,
+  );
+  const completedAt = completedRun?.completed_at || null;
   const facts = [
     {
-      label: "Deployment ID",
-      value: externalDeploymentId,
+      label: "Deployment details",
+      value: [
+        `🔀 ${formatPullRequestCount(deployedPullRequestCount)}`,
+        `🏗️ ${formatDeployProvider(provider)} · Deployment ${externalDeploymentId}`,
+        duration ? `🕒 Completed in ${duration}` : "",
+      ].filter(Boolean).join("\n"),
     },
-    {
-      label: "Provider status",
-      value: String(completionPhase),
-    },
+    buildDeploymentHealthFact(environmentStatus, completedAt),
   ];
-  if (finalizationResult) {
-    facts.push({
-      label: "PRs deployed",
-      value: String(finalizationResult.deployedPullRequestCount),
-    });
-  }
 
   return {
     tone: "success",
     title: `${environmentLabel} deployment complete`,
-    summary: `${environmentLabel} finished successfully.`,
+    status: {
+      detail: "Deployment completed",
+      label: "Live",
+      showIcon: false,
+      tone: "success",
+    },
     facts,
-    sections: finalizationResult
-      ? [
-          {
-            title: "Changes deployed",
-            text: deployedPullRequests.length === 0 ? "No PR details were available." : "",
-            items: deployedPullRequests.map((pullRequest) => ({
-              title: String(pullRequest?.title || "").trim()
-                || `${pullRequest?.repo}#${pullRequest?.pr_number}`,
-              url: pullRequest?.url || "",
-              description: `${pullRequest?.repo}#${pullRequest?.pr_number}`,
-            })),
-          },
-        ]
-      : [],
-    context: finalizationResult
-      ? "Deployment state and included PRs were committed together."
-      : "",
+    factsSeparator: true,
+    showHeaderIcon: true,
+    compactFooter: true,
+    actions: [{
+      id: `history_${deployEnvironment}`,
+      label: "View deployment history",
+      command: `history ${deployEnvironment}`,
+    }],
+    context: "🛡️ Monitoring continues automatically when enabled.",
   };
+}
+
+function buildDeploymentHealthFact(environmentStatus, completedAt) {
+  if (!environmentStatus) {
+    return { label: "Production health", value: "⚠️ Status unavailable" };
+  }
+  if (!environmentStatus?.enabled) {
+    return { label: "Production health", value: "🎛️ Monitoring off" };
+  }
+
+  if (!isHealthObservationAfterDeployment(environmentStatus.lastCheckedAt, completedAt)) {
+    return { label: "Production health", value: "⚠️ Awaiting post-deploy check" };
+  }
+
+  const state = String(environmentStatus.lastObservedState || "unknown").toLowerCase();
+  const httpStatus = environmentStatus.lastHttpStatus
+    ? ` · HTTP ${environmentStatus.lastHttpStatus}`
+    : "";
+  if (state === "healthy") {
+    return { label: "Production health", value: `✅ Healthy${httpStatus}` };
+  }
+  if (state === "unhealthy") {
+    return { label: "Production health", value: `⛔ Unhealthy${httpStatus}` };
+  }
+  return { label: "Production health", value: "⚠️ Awaiting first check" };
+}
+
+function isHealthObservationAfterDeployment(lastCheckedAt, completedAt) {
+  const lastCheckedTimestamp = new Date(lastCheckedAt || "").getTime();
+  const completedTimestamp = new Date(completedAt || "").getTime();
+  if (!Number.isFinite(completedTimestamp)) {
+    return false;
+  }
+  return Number.isFinite(lastCheckedTimestamp) && lastCheckedTimestamp > completedTimestamp;
+}
+
+function formatDeployProvider(provider) {
+  const normalizedProvider = String(provider || "").trim().toLowerCase();
+  if (normalizedProvider === "digitalocean") return "DigitalOcean";
+  if (normalizedProvider === "aws") return "AWS CodePipeline";
+  return normalizedProvider || "Unknown provider";
+}
+
+function formatDeploymentDuration(startedAt, completedAt) {
+  const startedTimestamp = new Date(startedAt || "").getTime();
+  const completedTimestamp = new Date(completedAt || "").getTime();
+  if (!Number.isFinite(startedTimestamp) || !Number.isFinite(completedTimestamp)) {
+    return "";
+  }
+
+  const totalSeconds = Math.max(Math.round((completedTimestamp - startedTimestamp) / 1000), 0);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return minutes > 0 ? `${minutes}m ${seconds}s` : `${seconds}s`;
+}
+
+function formatPullRequestCount(count) {
+  return `${count} pull request${count === 1 ? "" : "s"}`;
 }
 
 function buildDeploymentCompletionFailurePresentation({ externalDeploymentId, error }) {
@@ -328,18 +409,20 @@ async function waitForDeploymentCompletionAndFinalize({
       commandContext,
     );
     let finalizationResult = null;
+    let deploymentRun = null;
 
     if (executionResult.shouldFinalizeProductionDeployment) {
       finalizationResult = await calypsoCommandService.finalizeProductionDeployment(
         executionResult.productionDeploymentFinalization,
         commandContext,
       );
+      deploymentRun = finalizationResult?.deploymentRun || null;
     }
     if (
       executionResult.deploymentRunId
       && !executionResult.shouldFinalizeProductionDeployment
     ) {
-      await calypsoCommandService.completeDeploymentRun(
+      deploymentRun = await calypsoCommandService.completeDeploymentRun(
         executionResult.deploymentRunId,
         { status: "succeeded" },
         commandContext,
@@ -348,6 +431,7 @@ async function waitForDeploymentCompletionAndFinalize({
 
     return {
       completionState,
+      deploymentRun,
       finalizationResult,
     };
   } catch (error) {

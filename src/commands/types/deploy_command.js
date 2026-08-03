@@ -733,9 +733,11 @@ function buildDeploymentStartedPresentation({
 
   if (deployEnvironment === "prod") {
     sections.push({
+      layout: "rows",
       title: "Changes included",
       text: pullRequests.length === 0 ? "No tested PRs are queued for this deployment." : "",
       items: pullRequests.map((pullRequest) => ({
+        icon: "🔀",
         title: String(pullRequest?.title || "").trim()
           || `${pullRequest?.repo}#${pullRequest?.pr_number}`,
         url: pullRequest?.url || "",
@@ -745,10 +747,9 @@ function buildDeploymentStartedPresentation({
             slackUsernameByGithubUsername instanceof Map
               ? slackUsernameByGithubUsername
               : new Map(),
-        })} · ${pullRequest?.repo}#${pullRequest?.pr_number} · ${
-          pullRequest?.tested ? "Tested" : "Included"
-        }`,
-        inlineDescription: true,
+        })} · ${pullRequest?.repo}#${pullRequest?.pr_number}`,
+        status: pullRequest?.tested ? "Tested" : "Included",
+        statusTone: pullRequest?.tested ? "success" : "info",
       })),
     });
   }
@@ -756,19 +757,22 @@ function buildDeploymentStartedPresentation({
   return {
     tone: "info",
     title: `${environmentLabel} deployment started`,
-    summary: missingDeploymentIdText || `${environmentLabel} is now deploying.`,
+    status: {
+      detail: `${formatProviderLabel(deployProvider)}  •  ${String(deploymentId || "ID pending")}`,
+      label: "In progress",
+      tone: "info",
+    },
+    summary: missingDeploymentIdText || "",
     facts: [
       {
-        label: "Deployment ID",
-        value: String(deploymentId || "n/a"),
-      },
-      {
-        label: "Provider",
-        value: formatProviderLabel(deployProvider),
-      },
-      {
         label: "Triggered by",
+        tone: "info",
         value: deploymentTriggeredBy,
+      },
+      {
+        label: "Changes",
+        tone: "info",
+        value: deployEnvironment === "prod" ? String(pullRequests.length) : "Staging build",
       },
     ],
     sections,

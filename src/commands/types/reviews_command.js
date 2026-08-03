@@ -121,19 +121,34 @@ class ReviewsCommand extends BaseCalypsoCommand {
       ].join("\n"),
       {
         presentation: {
-          tone: "neutral",
-          title: "Pull requests waiting on review",
-          summary: `${sortedPullRequests.length} open pull request(s) need reviewer attention.`,
+          tone: "info",
+          title: "Pull request review queue",
+          status: {
+            detail: `${sortedPullRequests.length} ${sortedPullRequests.length === 1
+              ? "needs attention"
+              : "need attention"}`,
+            label: `${sortedPullRequests.length} open`,
+            tone: "warning",
+          },
           facts: [
-            { label: "PRs waiting", value: String(sortedPullRequests.length) },
-            { label: "Scope", value: parsedCommand.timeframe || "all open PRs" },
+            {
+              label: "Scope",
+              tone: "info",
+              value: parsedCommand.timeframe || "All open PRs",
+            },
           ],
           sections: pullRequestSections.map((section) => ({
+            layout: "rows",
             title: section.title,
             items: section.pullRequests.map((pullRequest) => ({
-              title: `${pullRequest.repo}#${pullRequest.pr_number} — ${pullRequest.title || "(untitled)"}`,
+              icon: "🔀",
+              title: `#${pullRequest.pr_number}  ${pullRequest.title || "(untitled)"}`,
               url: pullRequest.url || "",
-              description: `Author: ${pullRequest.author_login || "unknown"} · Review: ${pullRequest.review_state || "waiting"}`,
+              description: `${pullRequest.repo} · by ${pullRequest.author_login || "unknown"}`,
+              status: formatReviewStatus(pullRequest.review_state),
+              statusTone: pullRequest.review_state === "changes_requested"
+                ? "danger"
+                : "warning",
             })),
           })),
           actions: [{ id: "refresh_reviews", label: "Refresh", command: "reviews" }],
@@ -141,6 +156,10 @@ class ReviewsCommand extends BaseCalypsoCommand {
       },
     );
   }
+}
+
+function formatReviewStatus(reviewState) {
+  return reviewState === "changes_requested" ? "Changes requested" : "Review requested";
 }
 
 function normalizeGithubUser(rawGithubUser) {

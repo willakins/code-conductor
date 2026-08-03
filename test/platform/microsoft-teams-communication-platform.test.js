@@ -138,9 +138,12 @@ test("microsoft teams platform renders status as an adaptive card", async () => 
     "application/vnd.microsoft.card.adaptive",
   );
   const cardText = JSON.stringify(response.payload.attachments[0].content.body);
-  assert.match(cardText, /Production deploy is clear/);
-  assert.match(cardText, /will be included by force deploy/);
-  assert.match(cardText, /\[acme\/widgets#42 — Improve deploy controls\]/);
+  assert.match(cardText, /Production readiness/);
+  assert.match(cardText, /Ready to deploy/);
+  assert.match(cardText, /1 change queued/);
+  assert.match(cardText, /\[#42  Improve deploy controls\]/);
+  assert.match(cardText, /acme\/widgets/);
+  assert.match(cardText, /Untested/);
   assert.match(cardText, /Review deployment/);
 });
 

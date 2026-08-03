@@ -146,7 +146,7 @@ test("registerCalypsoCommand emails command lists pending support emails", async
   assert.equal(payload.response_type, "ephemeral");
   assert.match(payload.text, /Pending customer support emails:/);
   assert.match(payload.text, /\[42\] alice@example.com \| Billing question/);
-  assert.match(payload.blocks[0].text.text, /Support email/);
+  assert.match(readSlackBlocks(payload)[0].text.text, /Support email/);
 });
 
 test("registerCalypsoCommand emails command marks support email responded", async () => {
@@ -721,3 +721,7 @@ test("registerCalypsoCommand config command reports unresolved support email on 
   assert.equal(payload.response_type, "ephemeral");
   assert.match(payload.text, /Could not resolve `@ghost` to a Slack user/);
 });
+
+function readSlackBlocks(message) {
+  return message.attachments[0].blocks;
+}

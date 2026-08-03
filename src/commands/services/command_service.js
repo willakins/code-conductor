@@ -119,6 +119,16 @@ function createCalypsoCommandService(serviceOptions = {}) {
       return finalizeProductionDeployment(runtimeContext, deploymentFinalization);
     },
 
+    async readEnvironmentStatus(commandContext = {}) {
+      const runtimeContext = buildRuntimeContext({
+        serviceOptions,
+        commandContext,
+        defaultDependencies,
+      });
+
+      return runtimeContext.getEnvironmentStatusConfigFn(runtimeContext.pool);
+    },
+
     async completeDeploymentRun(runId, completion, commandContext = {}) {
       const runtimeContext = buildRuntimeContext({
         serviceOptions,
@@ -188,7 +198,8 @@ function createDefaultDependencies() {
     addUserToDeployWhitelistFn: addUserToDeployWhitelist,
     cacheSupportEmailThreadMessageTextFn: cacheSupportEmailThreadMessageText,
     clearSupportEmailOnCallFn: clearSupportEmailOnCall,
-    getEnvironmentStatusConfigFn: getEnvironmentStatusConfig,
+    getEnvironmentStatusConfigFn: (pool) =>
+      hasQueryablePool(pool) ? getEnvironmentStatusConfig(pool) : null,
     getLastProdDeployAtFn: (pool) =>
       hasQueryablePool(pool) ? getLastProdDeployAt(pool) : new Date(0),
     getConfiguredTimeFormatFn: getConfiguredTimeFormat,
@@ -208,7 +219,20 @@ function createDefaultDependencies() {
     getSupportEmailConfigFn: getSupportEmailConfig,
     getSupportEmailThreadByIdFn: getSupportEmailThreadById,
     listPendingSupportEmailThreadsFn: listPendingSupportEmailThreads,
-    listDeployablePullRequestsForDeploymentFn: listDeployablePullRequestsForDeployment,
+    listDeployablePullRequestsForDeploymentFn: (
+      pool,
+      lastDeployAt,
+      deploymentCutoffAt,
+      options,
+    ) =>
+      hasQueryablePool(pool)
+        ? listDeployablePullRequestsForDeployment(
+          pool,
+          lastDeployAt,
+          deploymentCutoffAt,
+          options,
+        )
+        : [],
     listOpenErrorTrackingIssuesFn: listOpenErrorTrackingIssues,
     listOpenPullRequestsWaitingOnReviewSinceFn: listOpenPullRequestsWaitingOnReviewSince,
     listGithubSlackUserMappingsFn: listGithubSlackUserMappings,

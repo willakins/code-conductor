@@ -32,7 +32,13 @@ class StatusCommand extends BaseCalypsoCommand {
       lastProductionDeploymentAt,
     );
     const blockingPullRequests = readMustTestBlockingPullRequests(untestedPullRequests);
-    const [productionTopicAvailability, explicitGateState, activeDeployment] = await Promise.all([
+    const [
+      productionTopicAvailability,
+      explicitGateState,
+      activeDeployment,
+      environmentStatus,
+      pendingPullRequests,
+    ] = await Promise.all([
       resolveProductionTopicAvailability(runtime),
       runtime.enableGateControl
         ? runtime.getDeploymentGateStateFn(runtime.pool, "prod")
@@ -40,6 +46,13 @@ class StatusCommand extends BaseCalypsoCommand {
       runtime.enableGateControl
         ? runtime.getActiveDeploymentRunFn(runtime.pool, "prod")
         : null,
+      runtime.getEnvironmentStatusConfigFn(runtime.pool),
+      runtime.listDeployablePullRequestsForDeploymentFn(
+        runtime.pool,
+        lastProductionDeploymentAt,
+        new Date(),
+        { includeUntested: true },
+      ),
     ]);
     const gateDecision = evaluateDeploymentGate({
       activeDeployment,
@@ -66,10 +79,12 @@ class StatusCommand extends BaseCalypsoCommand {
       presentation: buildStatusPresentation({
         lastDeployAt: lastProductionDeploymentAt,
         blockingPullRequests,
+        environmentStatus,
         gateDecision,
         timeFormat,
         timeZone,
         untestedPullRequests,
+        pendingPullRequests,
       }),
     });
   }
@@ -118,8 +133,10 @@ function buildStatusResponseText({
 
 function buildStatusPresentation({
   blockingPullRequests,
+  environmentStatus,
   lastDeployAt,
   gateDecision,
+  pendingPullRequests,
   timeFormat,
   timeZone,
   untestedPullRequests,
@@ -130,48 +147,52 @@ function buildStatusPresentation({
   const waitingPullRequests = Array.isArray(untestedPullRequests)
     ? untestedPullRequests
     : [];
+  const normalizedPendingPullRequests = Array.isArray(pendingPullRequests)
+    ? pendingPullRequests
+    : [];
+  const queuedPullRequests = normalizedPendingPullRequests.length > 0
+    ? normalizedPendingPullRequests
+    : waitingPullRequests;
   const hasMustTestBlockers = mustTestPullRequests.length > 0;
   const hasUntestedPullRequests = waitingPullRequests.length > 0;
   const isTopicBlocked = gateDecision.reasons.some((reason) => reason.code === "channel_topic_blocked");
   const isManualGateBlocked = gateDecision.reasons.some((reason) => reason.code === "manual_gate_closed");
   const isDeploymentActive = gateDecision.reasons.some((reason) => reason.code === "deployment_in_progress");
   const isProductionBlocked = !gateDecision.allowed;
+  const firstMustTestPullRequest = mustTestPullRequests[0];
+  const hasViewableMustTestBlocker = isProductionBlocked
+    && Boolean(firstMustTestPullRequest?.url);
 
   return {
     tone: isProductionBlocked ? "danger" : "success",
-    title: isProductionBlocked ? "Production deploy is blocked" : "Production deploy is clear",
-    summary: buildStatusSummary({
-      gateBlockDescription: isManualGateBlocked
-        ? "The explicit gate blocks production."
-        : isTopicBlocked
-          ? "The channel topic blocks production."
-          : "",
-      mustTestPullRequestCount: mustTestPullRequests.length,
-      untestedPullRequestCount: waitingPullRequests.length,
-    }),
+    title: "Production readiness",
+    showHeaderIcon: true,
+    status: {
+      ...buildReadinessStatus({
+        isDeploymentActive,
+        isManualGateBlocked,
+        isProductionBlocked,
+        isTopicBlocked,
+        mustTestPullRequestCount: mustTestPullRequests.length,
+        queuedPullRequestCount: queuedPullRequests.length,
+      }),
+      showIcon: false,
+    },
     facts: [
+      buildEnvironmentHealthFact(environmentStatus),
       {
-        label: "Last production deploy",
-        value: formatTimestampByTimeFormat(lastDeployAt, { timeFormat, timeZone }),
-      },
-      {
-        label: gateDecision.gateSource === "channel_topic" ? "Channel topic" : "Gate",
-        value: `${formatGateStatus(gateDecision)} (${gateDecision.gateSource.replace("_", " ")})`,
-      },
-      {
-        label: "Must-test PRs",
-        value: String(mustTestPullRequests.length),
-      },
-      {
-        label: "Untested PRs",
-        value: String(waitingPullRequests.length),
+        label: "Last deployment",
+        value: `🕒 ${formatTimestampByTimeFormat(lastDeployAt, { timeFormat, timeZone })}`,
       },
     ],
-    sections: hasUntestedPullRequests
+    factsSeparator: true,
+    factsPosition: "after_sections",
+    sections: queuedPullRequests.length > 0
       ? [
           {
-            title: "Needs testing",
-            items: waitingPullRequests.map(formatPullRequestPresentationItem),
+            layout: "rows",
+            title: "Changes since last deploy",
+            items: queuedPullRequests.map(formatPullRequestPresentationItem),
           },
         ]
       : [],
@@ -182,41 +203,88 @@ function buildStatusPresentation({
       isDeploymentActive,
     }),
     actions: [
-      { id: "refresh_status", label: "Refresh", command: "status" },
       ...(gateDecision.allowed
         ? [{ id: "deploy_prod", label: "Review deployment", command: "deploy prod", style: "primary" }]
         : []),
-      { id: "view_history", label: "View history", command: "history prod" },
+      ...(hasViewableMustTestBlocker
+        ? [{
+            id: `view_pr_${firstMustTestPullRequest.pr_number}`,
+            label: `View PR #${firstMustTestPullRequest.pr_number}`,
+            url: firstMustTestPullRequest.url,
+          }]
+        : []),
+      { id: "view_history", label: "Deployment history", command: "history prod" },
       ...waitingPullRequests.slice(0, 2).map((pullRequest) => ({
         id: `tested_${pullRequest.pr_number}`,
         label: `Mark #${pullRequest.pr_number} tested`,
         command: `tested ${pullRequest.pr_number}`,
         confirm: `Mark PR #${pullRequest.pr_number} as tested?`,
       })),
+      { id: "refresh_status", label: "Refresh", command: "status" },
     ],
   };
 }
 
-function buildStatusSummary({
-  gateBlockDescription,
+function buildReadinessStatus({
+  isDeploymentActive,
+  isManualGateBlocked,
+  isProductionBlocked,
+  isTopicBlocked,
   mustTestPullRequestCount,
-  untestedPullRequestCount,
+  queuedPullRequestCount,
 }) {
-  if (gateBlockDescription && mustTestPullRequestCount > 0) {
-    return `${gateBlockDescription} ${mustTestPullRequestCount} PR(s) are explicitly marked must-test.`;
+  if (!isProductionBlocked) {
+    return {
+      detail: formatCount(queuedPullRequestCount, "change", "changes", "queued"),
+      label: "Ready to deploy",
+      tone: "success",
+    };
   }
-  if (gateBlockDescription) {
-    return untestedPullRequestCount > 0
-      ? `${gateBlockDescription} ${untestedPullRequestCount} untested PR(s) will be included by force deploy.`
-      : `${gateBlockDescription} No untested PRs are waiting.`;
-  }
+
   if (mustTestPullRequestCount > 0) {
-    return `${mustTestPullRequestCount} PR(s) are explicitly marked must-test before production deployment.`;
+    return {
+      detail: formatCount(mustTestPullRequestCount, "required test", "required tests"),
+      label: "Blocked",
+      tone: "danger",
+    };
   }
-  if (untestedPullRequestCount > 0) {
-    return `${untestedPullRequestCount} untested PR(s) will be included by force deploy.`;
+
+  if (isDeploymentActive) {
+    return { detail: "Deployment in progress", label: "Blocked", tone: "danger" };
   }
-  return "No untested PRs are waiting.";
+
+  if (isManualGateBlocked || isTopicBlocked) {
+    return { detail: "Deployment gate closed", label: "Blocked", tone: "danger" };
+  }
+
+  return { detail: "Action required", label: "Blocked", tone: "danger" };
+}
+
+function buildEnvironmentHealthFact(environmentStatus) {
+  const normalizedState = String(environmentStatus?.lastObservedState || "unknown").toLowerCase();
+  const httpStatus = environmentStatus?.lastHttpStatus
+    ? ` · HTTP ${environmentStatus.lastHttpStatus}`
+    : "";
+
+  if (!environmentStatus) {
+    return { label: "Production app", value: "⚠️ Status unavailable" };
+  }
+  if (!environmentStatus.enabled) {
+    return { label: "Production app", value: "🎛️ Monitoring off" };
+  }
+  if (normalizedState === "healthy") {
+    return { label: "Production app", value: `✅ Healthy at last check${httpStatus}` };
+  }
+  if (normalizedState === "unhealthy") {
+    return { label: "Production app", value: `⛔ Unhealthy at last check${httpStatus}` };
+  }
+  return { label: "Production app", value: "⚠️ Awaiting first check" };
+}
+
+function formatCount(count, singular, plural, suffix = "") {
+  const normalizedCount = Number(count) || 0;
+  const label = normalizedCount === 1 ? singular : plural;
+  return [normalizedCount, label, suffix].filter((value) => value !== "").join(" ");
 }
 
 function buildStatusContext({
@@ -240,35 +308,30 @@ function buildStatusContext({
   return "The production deploy gate is ready.";
 }
 
-function capitalize(value) {
-  const normalized = String(value || "");
-  return normalized ? `${normalized[0].toUpperCase()}${normalized.slice(1)}` : normalized;
-}
-
-function formatGateStatus(gateDecision) {
-  if (gateDecision.gateSource === "channel_topic") {
-    if (gateDecision.gateStatus === "closed") {
-      return "Blocked";
-    }
-    if (gateDecision.gateStatus === "open") {
-      return "Available";
-    }
-  }
-  return capitalize(gateDecision.gateStatus);
-}
-
 function formatPullRequestPresentationItem(pullRequest) {
   const repo = String(pullRequest?.repo || "").trim();
   const prNumber = pullRequest?.pr_number;
   const title = String(pullRequest?.title || "").trim();
 
+  const normalizedStatus = String(pullRequest?.status || "untested").toLowerCase();
+  const requiresTesting = pullRequest?.force_deploy_blocked === true;
+  const status = normalizedStatus === "tested"
+    ? "Tested"
+    : requiresTesting
+      ? "Must test"
+      : "Untested";
+
   return {
-    title: [`${repo}#${prNumber}`, title].filter(Boolean).join(" — "),
+    icon: "🔀",
+    title: [`#${prNumber}`, title || `${repo} change`].filter(Boolean).join("  "),
     url: pullRequest?.url || "",
-    description: [
-      `Status: ${String(pullRequest?.status || "untested").toLowerCase()}`,
-      pullRequest?.force_deploy_blocked === true ? "Must test" : "",
-    ].filter(Boolean).join(" · "),
+    description: repo,
+    status,
+    statusTone: normalizedStatus === "tested"
+      ? "success"
+      : requiresTesting
+        ? "warning"
+        : "neutral",
   };
 }
 
