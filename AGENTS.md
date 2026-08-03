@@ -1,10 +1,10 @@
-# Calypso Bot — Agent Guide (Current Architecture)
+# Code Conductor — Agent Guide (Current Architecture)
 
-Calypso is in steady-state mode. Use this file as the default operating guide for future changes.
+Code Conductor is in steady-state mode. Use this file as the default operating guide for future changes.
 
 ## Product Context
 
-Calypso is a platform-abstracted deployment gatekeeper for a single repository workflow.
+Code Conductor is a provider-abstracted engineering operations bot for a single-repository workflow.
 
 - Communication providers: Slack, Microsoft Teams
 - Code host providers: GitHub, Bitbucket
@@ -15,9 +15,9 @@ Primary behavior:
 
 - Merged PRs are tracked as `untested`.
 - Open PR review state is tracked in `open_pr_review_state`.
-- Engineers mark PRs as tested via `/calypso tested <PR_NUMBER>`.
-- `/calypso deploy prod` is blocked when blocking PRs exist since last prod deploy.
-- If configured and gate is clear (or force is used), Calypso triggers deploy and records deployment state.
+- Engineers mark PRs as tested via `/conductor tested <PR_NUMBER>`.
+- `/conductor deploy prod` is blocked when blocking PRs exist since last prod deploy.
+- If configured and the gate is clear (or force is used), Code Conductor triggers the deploy and records deployment state.
 - Scheduled review recap messages post to a configured communication channel.
 - Daily open-PR sync can reconcile review and merge state from the active code host.
 
@@ -70,7 +70,7 @@ Primary behavior:
   - GitHub: `POST /github/webhook` (and alias `/codehost/webhook`)
   - Bitbucket: `POST /bitbucket/webhook` (and alias `/codehost/webhook`)
 - Communication commands:
-  - Slack slash command: `/calypso` (Socket Mode)
+  - Slack slash command: `/conductor` (Socket Mode; `/calypso` remains a compatibility alias)
   - Microsoft Teams HTTP command path: `POST /communication/commands` (configurable)
 
 ## Testing Rules

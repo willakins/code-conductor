@@ -30,7 +30,7 @@ class TestedCommand extends BaseCalypsoCommand {
     if (commandWords.length === 3 && firstArgument === "recent") {
       if (!isValidTimeframe(secondArgument)) {
         return this.buildRespondParsedCommand(
-          "Usage: `/calypso tested recent <day|week|month>`",
+          "Usage: `/conductor tested recent <day|week|month>`",
         );
       }
 
@@ -47,9 +47,9 @@ class TestedCommand extends BaseCalypsoCommand {
       return this.buildRespondParsedCommand(
         [
           "Usage:",
-          "`/calypso tested <PR_NUMBER>`",
-          "`/calypso tested all`",
-          "`/calypso tested recent <day|week|month>`",
+          "`/conductor tested <PR_NUMBER>`",
+          "`/conductor tested all`",
+          "`/conductor tested recent <day|week|month>`",
         ].join("\n"),
       );
     }
@@ -73,7 +73,7 @@ class TestedCommand extends BaseCalypsoCommand {
         [
           "Tested update denied.",
           "Only workspace admins or whitelisted users can mark PRs as tested.",
-          "Ask a workspace admin to run `/calypso whitelist <@USER>`.",
+          "Ask a workspace admin to run `/conductor whitelist <@USER>`.",
         ].join("\n"),
       );
     }

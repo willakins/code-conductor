@@ -7,22 +7,22 @@ test("handleCalypsoCommand returns help for empty input", () => {
   const result = handleCalypsoCommand({ text: "", user_id: "U123" });
 
   assert.equal(result.action, "respond");
-  assert.match(result.responseText, /Calypso/);
-  assert.match(result.responseText, /\/calypso help/);
+  assert.match(result.responseText, /Code Conductor/);
+  assert.match(result.responseText, /\/conductor help/);
 });
 
 test("handleCalypsoCommand returns help for help input", () => {
   const result = handleCalypsoCommand({ text: "HeLp", user_id: "U123" });
 
   assert.equal(result.action, "respond");
-  assert.match(result.responseText, /\/calypso help/);
-  assert.match(result.responseText, /\/calypso status/);
+  assert.match(result.responseText, /\/conductor help/);
+  assert.match(result.responseText, /\/conductor status/);
   assert.match(result.responseText, /Modules/);
-  assert.match(result.responseText, /\/calypso help deploy/);
-  assert.match(result.responseText, /\/calypso help reviews/);
-  assert.match(result.responseText, /\/calypso help monitoring/);
-  assert.match(result.responseText, /\/calypso help email/);
-  assert.match(result.responseText, /\/calypso help config/);
+  assert.match(result.responseText, /\/conductor help deploy/);
+  assert.match(result.responseText, /\/conductor help reviews/);
+  assert.match(result.responseText, /\/conductor help monitoring/);
+  assert.match(result.responseText, /\/conductor help email/);
+  assert.match(result.responseText, /\/conductor help config/);
 });
 
 test("handleCalypsoCommand uses configured bot name in help header", () => {
@@ -36,11 +36,11 @@ test("handleCalypsoCommand returns deploy topic help for testing alias", () => {
   const result = handleCalypsoCommand({ text: "help testing", user_id: "U123" });
 
   assert.equal(result.action, "respond");
-  assert.match(result.responseText, /\*Calypso Deploy Help\*/);
-  assert.match(result.responseText, /\/calypso status/);
-  assert.match(result.responseText, /\/calypso tested <PR_NUMBER>/);
-  assert.match(result.responseText, /\/calypso deploy list/);
-  assert.match(result.responseText, /\/calypso config deploy-environment:prod\|staging/);
+  assert.match(result.responseText, /\*Code Conductor Deploy Help\*/);
+  assert.match(result.responseText, /\/conductor status/);
+  assert.match(result.responseText, /\/conductor tested <PR_NUMBER>/);
+  assert.match(result.responseText, /\/conductor deploy list/);
+  assert.match(result.responseText, /\/conductor config deploy-environment:prod\|staging/);
   assert.match(result.responseText, /forced production deploy/);
   assert.match(result.responseText, /only explicit must-test PRs block/);
 });
@@ -49,50 +49,50 @@ test("handleCalypsoCommand returns reviews topic help for reviewing alias", () =
   const result = handleCalypsoCommand({ text: "help reviewing", user_id: "U123" });
 
   assert.equal(result.action, "respond");
-  assert.match(result.responseText, /\*Calypso Reviews Help\*/);
-  assert.match(result.responseText, /\/calypso reviews <GITHUB_USER>/);
-  assert.match(result.responseText, /\/calypso config review-recap-window:<all\|last-day\|last-week\|last-month>/);
-  assert.match(result.responseText, /\/calypso config review-recap-schedule:<daily\|weekday>@HH:MM\[,HH:MM\.\.\.\]/);
-  assert.match(result.responseText, /\/calypso config timezone:America\/New_York/);
+  assert.match(result.responseText, /\*Code Conductor Reviews Help\*/);
+  assert.match(result.responseText, /\/conductor reviews <GITHUB_USER>/);
+  assert.match(result.responseText, /\/conductor config review-recap-window:<all\|last-day\|last-week\|last-month>/);
+  assert.match(result.responseText, /\/conductor config review-recap-schedule:<daily\|weekday>@HH:MM\[,HH:MM\.\.\.\]/);
+  assert.match(result.responseText, /\/conductor config timezone:America\/New_York/);
 });
 
 test("handleCalypsoCommand returns monitoring topic help", () => {
   const result = handleCalypsoCommand({ text: "help monitoring", user_id: "U123" });
 
   assert.equal(result.action, "respond");
-  assert.match(result.responseText, /\*Calypso Monitoring Help\*/);
-  assert.match(result.responseText, /\/calypso errors/);
-  assert.match(result.responseText, /\/calypso config environment-status-url:https:\/\/example\.com\/healthz/);
-  assert.match(result.responseText, /\/calypso config error-tracking-project:<PROJECT_SLUG>/);
+  assert.match(result.responseText, /\*Code Conductor Monitoring Help\*/);
+  assert.match(result.responseText, /\/conductor errors/);
+  assert.match(result.responseText, /\/conductor config environment-status-url:https:\/\/example\.com\/healthz/);
+  assert.match(result.responseText, /\/conductor config error-tracking-project:<PROJECT_SLUG>/);
 });
 
 test("handleCalypsoCommand returns email topic help", () => {
   const result = handleCalypsoCommand({ text: "help email", user_id: "U123" });
 
   assert.equal(result.action, "respond");
-  assert.match(result.responseText, /\*Calypso Email Help\*/);
-  assert.match(result.responseText, /\/calypso emails draft <EMAIL_ID> \[ADDITIONAL_INSTRUCTIONS\.\.\.\]/);
-  assert.match(result.responseText, /\/calypso emails responded <EMAIL_ID>/);
-  assert.match(result.responseText, /\/calypso config email-on-call <@USER\|USER_ID> <Nh\|Nd\|Nw>/);
+  assert.match(result.responseText, /\*Code Conductor Email Help\*/);
+  assert.match(result.responseText, /\/conductor emails draft <EMAIL_ID> \[ADDITIONAL_INSTRUCTIONS\.\.\.\]/);
+  assert.match(result.responseText, /\/conductor emails responded <EMAIL_ID>/);
+  assert.match(result.responseText, /\/conductor config email-on-call <@USER\|USER_ID> <Nh\|Nd\|Nw>/);
 });
 
 test("handleCalypsoCommand returns config topic help", () => {
   const result = handleCalypsoCommand({ text: "help config", user_id: "U123" });
 
   assert.equal(result.action, "respond");
-  assert.match(result.responseText, /\*Calypso Config Help\*/);
-  assert.match(result.responseText, /\/calypso config time-format:human\|long/);
+  assert.match(result.responseText, /\*Code Conductor Config Help\*/);
+  assert.match(result.responseText, /\/conductor config time-format:human\|long/);
   assert.match(
     result.responseText,
-    /\/calypso config github-slack-user-map:<GITHUB_USER>=<@USER\|USER_ID\|@HANDLE>/,
+    /\/conductor config github-slack-user-map:<GITHUB_USER>=<@USER\|USER_ID\|@HANDLE>/,
   );
-  assert.match(result.responseText, /\/calypso config communication-provider:slack\|microsoft_teams/);
-  assert.match(result.responseText, /\/calypso config email-provider:gmail\|outlook/);
-  assert.match(result.responseText, /\/calypso config ai-provider:openai\|anthropic/);
-  assert.match(result.responseText, /\/calypso config error-tracking-provider:sentry\|rollbar/);
-  assert.match(result.responseText, /\/calypso help reviews/);
-  assert.match(result.responseText, /\/calypso help monitoring/);
-  assert.match(result.responseText, /\/calypso help email/);
+  assert.match(result.responseText, /\/conductor config communication-provider:slack\|microsoft_teams/);
+  assert.match(result.responseText, /\/conductor config email-provider:gmail\|outlook/);
+  assert.match(result.responseText, /\/conductor config ai-provider:openai\|anthropic/);
+  assert.match(result.responseText, /\/conductor config error-tracking-provider:sentry\|rollbar/);
+  assert.match(result.responseText, /\/conductor help reviews/);
+  assert.match(result.responseText, /\/conductor help monitoring/);
+  assert.match(result.responseText, /\/conductor help email/);
 });
 
 test("handleCalypsoCommand rejects unknown help topic", () => {
@@ -100,7 +100,7 @@ test("handleCalypsoCommand rejects unknown help topic", () => {
 
   assert.equal(result.action, "respond");
   assert.match(result.responseText, /Usage:/);
-  assert.match(result.responseText, /\/calypso help deploy/);
+  assert.match(result.responseText, /\/conductor help deploy/);
 });
 
 test("handleCalypsoCommand routes status input", () => {
@@ -119,7 +119,7 @@ test("handleCalypsoCommand rejects invalid sync input", () => {
   const result = handleCalypsoCommand({ text: "sync now", user_id: "U123" });
 
   assert.equal(result.action, "respond");
-  assert.match(result.responseText, /Usage: `\/calypso sync`/);
+  assert.match(result.responseText, /Usage: `\/conductor sync`/);
 });
 
 test("handleCalypsoCommand routes reviews input", () => {
@@ -167,7 +167,7 @@ test("handleCalypsoCommand rejects invalid reviews input", () => {
 
   assert.equal(result.action, "respond");
   assert.match(result.responseText, /Usage:/);
-  assert.match(result.responseText, /`\/calypso reviews`/);
+  assert.match(result.responseText, /`\/conductor reviews`/);
 });
 
 test("handleCalypsoCommand routes tested input with PR number", () => {
@@ -209,7 +209,7 @@ test("handleCalypsoCommand rejects invalid must-test input", () => {
 
   assert.equal(result.action, "respond");
   assert.match(result.responseText, /Usage:/);
-  assert.match(result.responseText, /\/calypso must-test <PR_NUMBER>/);
+  assert.match(result.responseText, /\/conductor must-test <PR_NUMBER>/);
 });
 
 test("handleCalypsoCommand rejects tested input without PR number", () => {
@@ -250,9 +250,9 @@ test("handleCalypsoCommand rejects invalid deploy input", () => {
   const result = handleCalypsoCommand({ text: "deploy prod force", user_id: "U123" });
 
   assert.equal(result.action, "respond");
-  assert.match(result.responseText, /`\/calypso deploy`/);
-  assert.match(result.responseText, /`\/calypso deploy staging`/);
-  assert.match(result.responseText, /`\/calypso deploy list`/);
+  assert.match(result.responseText, /`\/conductor deploy`/);
+  assert.match(result.responseText, /`\/conductor deploy staging`/);
+  assert.match(result.responseText, /`\/conductor deploy list`/);
   assert.doesNotMatch(result.responseText, /force/);
 });
 
@@ -282,8 +282,8 @@ test("handleCalypsoCommand rejects invalid config input", () => {
 
   assert.equal(result.action, "respond");
   assert.match(result.responseText, /Usage:/);
-  assert.match(result.responseText, /`\/calypso config time-format:human`/);
-  assert.match(result.responseText, /`\/calypso config timezone:America\/New_York`/);
+  assert.match(result.responseText, /`\/conductor config time-format:human`/);
+  assert.match(result.responseText, /`\/conductor config timezone:America\/New_York`/);
 });
 
 test("handleCalypsoCommand routes config timezone input", () => {
@@ -496,21 +496,20 @@ test("handleCalypsoCommand rejects tested command with injection-like payload", 
   assert.match(result.responseText, /Usage:/);
 });
 
-test("registerCalypsoCommand registers /calypso and responds ephemerally", async () => {
-  let commandName;
-  let commandHandler;
+test("registerCalypsoCommand registers /conductor and responds ephemerally", async () => {
+  const commandHandlers = new Map();
 
   const app = {
     command(name, handler) {
-      commandName = name;
-      commandHandler = handler;
+      commandHandlers.set(name, handler);
     },
   };
 
   registerCalypsoCommand(app);
 
-  assert.equal(commandName, "/calypso");
+  const commandHandler = commandHandlers.get("/conductor");
   assert.equal(typeof commandHandler, "function");
+  assert.equal(commandHandlers.get("/calypso"), commandHandler);
 
   let ackCalled = false;
   let payload;
@@ -527,11 +526,11 @@ test("registerCalypsoCommand registers /calypso and responds ephemerally", async
 
   assert.equal(ackCalled, true);
   assert.equal(payload.response_type, "ephemeral");
-  assert.match(payload.text, /\/calypso help/);
-  assert.match(payload.text, /\/calypso status/);
+  assert.match(payload.text, /\/conductor help/);
+  assert.match(payload.text, /\/conductor status/);
   assert.match(payload.text, /Modules/);
-  assert.match(payload.text, /\/calypso help monitoring/);
-  assert.match(payload.blocks[0].text.text, /Calypso help/);
+  assert.match(payload.text, /\/conductor help monitoring/);
+  assert.match(payload.blocks[0].text.text, /Code Conductor help/);
   assert.ok(payload.blocks.some((block) => block.type === "divider"));
 });
 
@@ -1288,7 +1287,7 @@ test("registerCalypsoCommand blocks deploy when a PR is explicitly marked must-t
   assert.match(payload.text, /Force deploy blocked/);
   assert.match(payload.text, /must-test and cannot be bypassed/);
   assert.match(payload.text, /<https:\/\/github.com\/croft-eng\/croft\/pull\/12\|croft-eng\/croft#12> \(untested\)/);
-  assert.match(payload.text, /\/calypso must-test off <PR_NUMBER>/);
+  assert.match(payload.text, /\/conductor must-test off <PR_NUMBER>/);
 });
 
 test("registerCalypsoCommand blocks prod deploy when channel topic marks production red", async () => {
@@ -2403,7 +2402,7 @@ test("registerCalypsoCommand whitelist command reports missing scope for @handle
   assert.equal(payload.response_type, "ephemeral");
   assert.match(payload.text, /missing_scope/);
   assert.match(payload.text, /users:read/);
-  assert.match(payload.text, /\/calypso whitelist U123ABC/);
+  assert.match(payload.text, /\/conductor whitelist U123ABC/);
 });
 
 test("registerCalypsoCommand whitelist command returns usage for missing target user", async () => {
@@ -2435,7 +2434,7 @@ test("registerCalypsoCommand whitelist command returns usage for missing target 
   });
 
   assert.equal(payload.response_type, "ephemeral");
-  assert.equal(payload.text, "Usage: `/calypso whitelist <@USER>`");
+  assert.equal(payload.text, "Usage: `/conductor whitelist <@USER>`");
 });
 
 test("registerCalypsoCommand config command updates time format", async () => {
@@ -2528,8 +2527,8 @@ test("registerCalypsoCommand config command returns usage when argument is missi
 
   assert.equal(payload.response_type, "ephemeral");
   assert.match(payload.text, /^Usage:/);
-  assert.match(payload.text, /`\/calypso config time-format:human`/);
-  assert.match(payload.text, /`\/calypso config timezone:America\/New_York`/);
+  assert.match(payload.text, /`\/conductor config time-format:human`/);
+  assert.match(payload.text, /`\/conductor config timezone:America\/New_York`/);
 });
 
 test("registerCalypsoCommand config command updates timezone when valid", async () => {
@@ -2821,7 +2820,7 @@ test("registerCalypsoCommand config command reports channel access error when bo
 
   registerCalypsoCommand(app, {
     pool: {},
-    botName: "Calypso",
+    botName: "Code Conductor",
     resolveDeployAccessFn: async () => ({ canDeploy: true }),
     setReviewRecapChannelFn: async () => {
       setChannelCalled = true;
@@ -2847,8 +2846,8 @@ test("registerCalypsoCommand config command reports channel access error when bo
   });
 
   assert.equal(payload.response_type, "ephemeral");
-  assert.match(payload.text, /Calypso is not in that channel/);
-  assert.match(payload.text, /Invite Calypso to the channel/);
+  assert.match(payload.text, /Code Conductor is not in that channel/);
+  assert.match(payload.text, /Invite Code Conductor to the channel/);
   assert.equal(setChannelCalled, false);
 });
 
@@ -2897,7 +2896,7 @@ test("registerCalypsoCommand config command reports channel access verification 
 
   registerCalypsoCommand(app, {
     pool: {},
-    botName: "Calypso",
+    botName: "Code Conductor",
     resolveDeployAccessFn: async () => ({ canDeploy: true }),
     setReviewRecapChannelFn: async () => {
       setChannelCalled = true;
@@ -2940,7 +2939,7 @@ test("registerCalypsoCommand config command reports missing scopes for channel a
 
   registerCalypsoCommand(app, {
     pool: {},
-    botName: "Calypso",
+    botName: "Code Conductor",
     resolveDeployAccessFn: async () => ({ canDeploy: true }),
     setReviewRecapChannelFn: async () => {
       setChannelCalled = true;

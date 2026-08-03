@@ -345,7 +345,7 @@ class ConfigCommand extends BaseCalypsoCommand {
         [
           "Config update denied.",
           "Only workspace admins or whitelisted users can update config.",
-          "Ask a workspace admin to run `/calypso whitelist <@USER>`.",
+          "Ask a workspace admin to run `/conductor whitelist <@USER>`.",
         ].join("\n"),
       );
     }
@@ -378,7 +378,7 @@ class ConfigCommand extends BaseCalypsoCommand {
       return updateChannelScopedConfig.call(this, {
         actionLabel: "review recap",
         runtime,
-        retryCommand: "/calypso config review-recap-channel:<#CHANNEL|CHANNEL_ID>",
+        retryCommand: "/conductor config review-recap-channel:<#CHANNEL|CHANNEL_ID>",
         setChannelFn: runtime.setReviewRecapChannelFn,
         successText: "Updated review recap channel",
         targetChannelReference: parsedCommand.targetChannelReference,
@@ -488,7 +488,7 @@ class ConfigCommand extends BaseCalypsoCommand {
       return updateChannelScopedConfig.call(this, {
         actionLabel: "environment status",
         runtime,
-        retryCommand: "/calypso config environment-status-channel:<#CHANNEL|CHANNEL_ID>",
+        retryCommand: "/conductor config environment-status-channel:<#CHANNEL|CHANNEL_ID>",
         setChannelFn: runtime.setEnvironmentStatusChannelFn,
         successText: "Updated environment status channel",
         targetChannelReference: parsedCommand.targetChannelReference,
@@ -511,7 +511,7 @@ class ConfigCommand extends BaseCalypsoCommand {
       return updateChannelScopedConfig.call(this, {
         actionLabel: "error tracking",
         runtime,
-        retryCommand: "/calypso config error-tracking-channel:<#CHANNEL|CHANNEL_ID>",
+        retryCommand: "/conductor config error-tracking-channel:<#CHANNEL|CHANNEL_ID>",
         setChannelFn: runtime.setErrorTrackingChannelFn,
         successText: "Updated error tracking channel",
         targetChannelReference: parsedCommand.targetChannelReference,
@@ -580,7 +580,7 @@ class ConfigCommand extends BaseCalypsoCommand {
       return updateChannelScopedConfig.call(this, {
         actionLabel: "support email",
         runtime,
-        retryCommand: "/calypso config email-channel:<#CHANNEL|CHANNEL_ID>",
+        retryCommand: "/conductor config email-channel:<#CHANNEL|CHANNEL_ID>",
         setChannelFn: runtime.setSupportEmailChannelFn,
         successText: "Updated support email channel",
         targetChannelReference: parsedCommand.targetChannelReference,
@@ -607,7 +607,7 @@ class ConfigCommand extends BaseCalypsoCommand {
           buildUserResolutionError({
             resolution: userResolution,
             targetUserHandle: userResolution.targetUserHandle || parsedCommand.targetUserHandle,
-            usageCommand: "/calypso config email-on-call <@USER> 1d",
+            usageCommand: "/conductor config email-on-call <@USER> 1d",
           }),
           { responseType: "ephemeral" },
         );
@@ -793,7 +793,7 @@ function buildConfigPresentation(responseText) {
       ? "Configuration needs attention"
       : isSuccess
         ? "Configuration updated"
-        : "Calypso configuration",
+        : "Code Conductor configuration",
     summary: text.split("\n")[0],
     sections: text.includes("\n")
       ? [{ title: "Details", text: text.split("\n").slice(1).join("\n") }]
@@ -838,45 +838,45 @@ function isWorkspaceScopedConfigAction(action) {
 function buildConfigUsageMessage() {
   return [
     "Usage:",
-    "`/calypso config time-format:human`",
-    "`/calypso config time-format:long`",
-    "`/calypso config timezone:America/New_York`",
+    "`/conductor config time-format:human`",
+    "`/conductor config time-format:long`",
+    "`/conductor config timezone:America/New_York`",
     "",
     "PR review recap setup:",
-    "`/calypso config review-recap-channel:<#CHANNEL|CHANNEL_ID|channel-name>`",
-    "`/calypso config review-recap-window:<all|last-day|last-week|last-month>`",
-    "`/calypso config review-recap-recency:<Nd|Nw>` (legacy)",
-    "`/calypso config review-recap-schedule:<daily|weekday>@HH:MM[,HH:MM...]`",
-    "`/calypso config review-recap-send-weekends:<on|off>`",
-    "`/calypso config review-recap-send-holidays:<on|off>`",
+    "`/conductor config review-recap-channel:<#CHANNEL|CHANNEL_ID|channel-name>`",
+    "`/conductor config review-recap-window:<all|last-day|last-week|last-month>`",
+    "`/conductor config review-recap-recency:<Nd|Nw>` (legacy)",
+    "`/conductor config review-recap-schedule:<daily|weekday>@HH:MM[,HH:MM...]`",
+    "`/conductor config review-recap-send-weekends:<on|off>`",
+    "`/conductor config review-recap-send-holidays:<on|off>`",
     "",
     "Environment status setup:",
-    "`/calypso config environment-status:on|off`",
-    "`/calypso config environment-status-url:https://example.com/healthz`",
-    "`/calypso config environment-status-channel:<#CHANNEL|CHANNEL_ID|channel-name>`",
+    "`/conductor config environment-status:on|off`",
+    "`/conductor config environment-status-url:https://example.com/healthz`",
+    "`/conductor config environment-status-channel:<#CHANNEL|CHANNEL_ID|channel-name>`",
     "",
     "Error tracking setup:",
-    "`/calypso config error-tracking:on|off`",
-    "`/calypso config error-tracking-channel:<#CHANNEL|CHANNEL_ID|channel-name>`",
-    "`/calypso config error-tracking-project:<PROJECT_SLUG>`",
-    "`/calypso config error-tracking-environment:<ENVIRONMENT|any>`",
+    "`/conductor config error-tracking:on|off`",
+    "`/conductor config error-tracking-channel:<#CHANNEL|CHANNEL_ID|channel-name>`",
+    "`/conductor config error-tracking-project:<PROJECT_SLUG>`",
+    "`/conductor config error-tracking-environment:<ENVIRONMENT|any>`",
     "",
     "Support email setup:",
-    "`/calypso config email-monitor:on|off`",
-    "`/calypso config email-channel:<#CHANNEL|CHANNEL_ID|channel-name>`",
-    "`/calypso config email-on-call <@USER|USER_ID> <Nh|Nd|Nw>`",
-    "`/calypso config email-on-call off`",
-    "`/calypso config github-slack-user-map:<GITHUB_USER>=<@USER|USER_ID|@HANDLE>`",
+    "`/conductor config email-monitor:on|off`",
+    "`/conductor config email-channel:<#CHANNEL|CHANNEL_ID|channel-name>`",
+    "`/conductor config email-on-call <@USER|USER_ID> <Nh|Nd|Nw>`",
+    "`/conductor config email-on-call off`",
+    "`/conductor config github-slack-user-map:<GITHUB_USER>=<@USER|USER_ID|@HANDLE>`",
     "",
     "Platform provider setup:",
-    "`/calypso config communication-provider:slack|microsoft_teams`",
-    "`/calypso config code-host-provider:github|bitbucket`",
-    "`/calypso config deploy-provider:digitalocean|aws`",
-    "`/calypso config deploy-environment:prod|staging`",
-    "`/calypso config email-provider:gmail|outlook`",
-    "`/calypso config ai-provider:openai|anthropic`",
-    "`/calypso config error-tracking-provider:sentry|rollbar`",
-    "Defaults: `all`, `mon@09:00`, `send-weekends:off`, `send-holidays:off`, timezone from `/calypso config timezone`.",
+    "`/conductor config communication-provider:slack|microsoft_teams`",
+    "`/conductor config code-host-provider:github|bitbucket`",
+    "`/conductor config deploy-provider:digitalocean|aws`",
+    "`/conductor config deploy-environment:prod|staging`",
+    "`/conductor config email-provider:gmail|outlook`",
+    "`/conductor config ai-provider:openai|anthropic`",
+    "`/conductor config error-tracking-provider:sentry|rollbar`",
+    "Defaults: `all`, `mon@09:00`, `send-weekends:off`, `send-holidays:off`, timezone from `/conductor config timezone`.",
   ].join("\n");
 }
 
@@ -1063,9 +1063,9 @@ function buildChannelAccessError({
   neededScopes,
   providedScopes,
   botName,
-  retryCommand = "/calypso config review-recap-channel:<#CHANNEL|CHANNEL_ID>",
+  retryCommand = "/conductor config review-recap-channel:<#CHANNEL|CHANNEL_ID>",
 }) {
-  const resolvedBotName = String(botName || "Calypso").trim() || "Calypso";
+  const resolvedBotName = String(botName || "Code Conductor").trim() || "Code Conductor";
   if (reason === "not_in_channel") {
     return [
       `Cannot set ${actionLabel} channel to <#${targetChannelId}> because ${resolvedBotName} is not in that channel.`,
@@ -1117,7 +1117,7 @@ function buildChannelResolutionError({
   reason = "invalid_reference",
   botName,
 }) {
-  const resolvedBotName = String(botName || "Calypso").trim() || "Calypso";
+  const resolvedBotName = String(botName || "Code Conductor").trim() || "Code Conductor";
   if (reason === "channel_not_found") {
     return [
       `Cannot set ${actionLabel} channel because \`${targetChannelReference}\` was not found.`,

@@ -226,13 +226,13 @@ function buildStatusContext({
   isDeploymentActive,
 }) {
   if (isDeploymentActive) {
-    return "A deployment is already in progress. Use `/calypso history prod` for details.";
+    return "A deployment is already in progress. Use `/conductor history prod` for details.";
   }
   if (isTopicBlocked) {
-    return "Change the channel's Production topic marker from red before deploying. You can also set an explicit gate with `/calypso gate open prod`.";
+    return "Change the channel's Production topic marker from red before deploying. You can also set an explicit gate with `/conductor gate open prod`.";
   }
   if (hasMustTestBlockers) {
-    return "Must-test PRs require `/calypso tested <PR_NUMBER>` before production deployment.";
+    return "Must-test PRs require `/conductor tested <PR_NUMBER>` before production deployment.";
   }
   if (hasUntestedPullRequests) {
     return "Untested PRs do not block production; mark them tested when verification is complete.";

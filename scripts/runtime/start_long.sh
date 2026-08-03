@@ -192,7 +192,7 @@ main() {
   ngrok_public_url="$(read_ngrok_public_url)"
 
   echo
-  echo "Calypso long-term stack started."
+  echo "Code Conductor long-term stack started."
   echo "- App log:   $APP_LOG_FILE"
   echo "- ngrok log: $NGROK_LOG_FILE"
   echo "- PG log:    $PG_LOG_FILE"

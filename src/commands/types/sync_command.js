@@ -7,7 +7,7 @@ class SyncCommand extends BaseCalypsoCommand {
 
   parse({ commandWords }) {
     if (commandWords.length !== 1) {
-      return this.buildRespondParsedCommand("Usage: `/calypso sync`");
+      return this.buildRespondParsedCommand("Usage: `/conductor sync`");
     }
 
     return this.buildParsedCommand({
@@ -22,7 +22,7 @@ class SyncCommand extends BaseCalypsoCommand {
         [
           "Sync denied.",
           "Only workspace admins or whitelisted users can run manual sync.",
-          "Ask a workspace admin to run `/calypso whitelist <@USER>`.",
+          "Ask a workspace admin to run `/conductor whitelist <@USER>`.",
         ].join("\n"),
       );
     }

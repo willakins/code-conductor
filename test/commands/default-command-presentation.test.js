@@ -7,17 +7,17 @@ const {
 
 test("default command presentation provides a title for every command", () => {
   const expectedTitles = {
-    config: "Calypso configuration",
-    deploy: "Calypso deployment",
+    config: "Code Conductor configuration",
+    deploy: "Code Conductor deployment",
     emails: "Support email",
     errors: "Error tracking",
-    help: "Calypso help",
+    help: "Code Conductor help",
     "must-test": "Force-deploy protection",
     reviews: "Pull request reviews",
     status: "Production deploy status",
     sync: "Pull request sync",
     tested: "Testing confirmation",
-    unknown: "Calypso command",
+    unknown: "Code Conductor command",
     whitelist: "Deploy access",
   };
 
@@ -34,14 +34,14 @@ test("default command presentation separates headings and long-form content", ()
   const presentation = buildDefaultCommandPresentation({
     commandName: "help",
     responseText: [
-      "*Calypso*",
+      "*Code Conductor*",
       "Deployment gatekeeper.",
       "",
       "*Start Here*",
-      "`/calypso status` Show deploy blockers.",
+      "`/conductor status` Show deploy blockers.",
       "",
       "*Modules*",
-      "`/calypso help deploy` Show deploy help.",
+      "`/conductor help deploy` Show deploy help.",
     ].join("\n"),
   });
 
@@ -49,8 +49,8 @@ test("default command presentation separates headings and long-form content", ()
   assert.deepEqual(
     presentation.sections.map((section) => section.text),
     [
-      "*Start Here*\n`/calypso status` Show deploy blockers.",
-      "*Modules*\n`/calypso help deploy` Show deploy help.",
+      "*Start Here*\n`/conductor status` Show deploy blockers.",
+      "*Modules*\n`/conductor help deploy` Show deploy help.",
     ],
   );
 });

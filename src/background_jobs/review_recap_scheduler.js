@@ -265,7 +265,7 @@ function logPostError({ schedulerState, logger, error, attemptCount, slotKey }) 
     logger.error(
       [
         "Review recap post failed: bot is not in the configured channel (`not_in_channel`).",
-        "Invite the bot to that channel and rerun `/calypso config review-recap-channel:<#CHANNEL|CHANNEL_ID>`.",
+        "Invite the bot to that channel and rerun `/conductor config review-recap-channel:<#CHANNEL|CHANNEL_ID>`.",
       ].join(" "),
     );
   } else {

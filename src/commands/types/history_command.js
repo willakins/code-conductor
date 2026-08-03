@@ -9,7 +9,7 @@ class HistoryCommand extends BaseCalypsoCommand {
   parse({ commandWords }) {
     const environment = commandWords[1] ? normalizeEnvironment(commandWords[1]) : null;
     if (commandWords.length > 2 || (commandWords[1] && !environment)) {
-      return this.buildRespondParsedCommand("Usage: `/calypso history [prod|staging]`");
+      return this.buildRespondParsedCommand("Usage: `/conductor history [prod|staging]`");
     }
     return this.buildParsedCommand({ action: "history", environment });
   }
@@ -24,15 +24,15 @@ class HistoryCommand extends BaseCalypsoCommand {
       runtime.readTimeZonePreferenceFn(runtime),
     ]);
     if (events.length === 0) {
-      return this.buildExecutionResult("No Calypso audit events found.");
+      return this.buildExecutionResult("No Code Conductor audit events found.");
     }
 
     return this.buildExecutionResult(
-      ["Recent Calypso activity:", ...events.map((event) => `• ${event.summary}`)].join("\n"),
+      ["Recent Code Conductor activity:", ...events.map((event) => `• ${event.summary}`)].join("\n"),
       {
         presentation: {
           tone: "neutral",
-          title: "Calypso activity",
+          title: "Code Conductor activity",
           summary: parsedCommand.environment
             ? `Recent ${parsedCommand.environment} gate and deployment events.`
             : "Recent gate and deployment events.",

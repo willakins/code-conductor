@@ -78,7 +78,7 @@ function registerCalypsoCommand(app, options = {}) {
         respond: sendResponse,
       });
     } catch (error) {
-      console.error("Failed to process /calypso command.");
+      console.error("Failed to process /conductor command.");
       console.error(error.message);
       const errorText = `${botName} hit an error while processing that command.`;
       await respond(buildCommandResponse({
@@ -89,7 +89,9 @@ function registerCalypsoCommand(app, options = {}) {
       }));
     }
   };
+  // Keep the original command as a compatibility alias for existing workspaces.
   app.command("/calypso", commandHandler);
+  app.command("/conductor", commandHandler);
 
   if (typeof app.action === "function") {
     app.action(/^calypso:/, async ({ ack, action, body, client, respond }) =>
@@ -301,7 +303,7 @@ function buildDeploymentCompletionFailurePresentation({ externalDeploymentId, er
 
 function buildDeploymentCompletionFailureText({ externalDeploymentId, error }) {
   if (error?.code === "DEPLOY_STATE_ROLLED_BACK") {
-    return `${SLACK_HERE_MENTION} Deployment ${externalDeploymentId} finished, but Calypso could not commit deployment state: ${error.message} No deploy records or PR statuses were committed.`;
+    return `${SLACK_HERE_MENTION} Deployment ${externalDeploymentId} finished, but Code Conductor could not commit deployment state: ${error.message} No deploy records or PR statuses were committed.`;
   }
 
   return `${SLACK_HERE_MENTION} Deployment ${externalDeploymentId} failed after trigger: ${error.message}. No deploy records or PR statuses were committed.`;

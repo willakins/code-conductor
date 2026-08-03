@@ -163,7 +163,7 @@ function buildClientOptions(overrides = {}) {
     apiBaseUrl: "https://api.bitbucket.org/2.0",
     apiMaxPages: 100,
     apiPageSize: 50,
-    apiUserAgent: "calypso-bot",
+    apiUserAgent: "code-conductor-bot",
     token: "bb-token",
     ...overrides,
   };

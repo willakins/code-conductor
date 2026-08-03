@@ -181,9 +181,9 @@ class EmailsCommand extends BaseCalypsoCommand {
 function buildUsageMessage() {
   return [
     "Usage:",
-    "`/calypso emails`",
-    "`/calypso emails draft <EMAIL_ID> [ADDITIONAL_INSTRUCTIONS...]`",
-    "`/calypso emails responded <EMAIL_ID>`",
+    "`/conductor emails`",
+    "`/conductor emails draft <EMAIL_ID> [ADDITIONAL_INSTRUCTIONS...]`",
+    "`/conductor emails responded <EMAIL_ID>`",
   ].join("\n");
 }
 

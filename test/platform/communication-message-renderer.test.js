@@ -27,7 +27,7 @@ const STATUS_PRESENTATION = {
       ],
     },
   ],
-  context: "Run `/calypso tested 42` when verified.",
+  context: "Run `/conductor tested 42` when verified.",
 };
 
 test("communication message renderer builds Slack blocks with plain-text fallback", () => {

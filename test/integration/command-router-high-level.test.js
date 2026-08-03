@@ -80,7 +80,7 @@ test("high-level command lifecycle: status -> forced deploy -> status", async ()
     },
   });
 
-  assert.equal(app.commandName, "/calypso");
+  assert.equal(app.commandName, "/conductor");
 
   const statusBefore = await runSlashCommand(commandHandler, "status", "U_TESTER");
   const deployResponses = await runSlashCommandResponses(commandHandler, "deploy prod", "U_TESTER");
