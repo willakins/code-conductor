@@ -12,7 +12,7 @@ deployment, monitoring, and support systems behind one auditable workflow—with
 tools your team already uses.
 
 <p align="center">
-  <img src="docs/assets/screenshots/production-readiness.png" alt="Code Conductor showing production readiness, PR test state, and application health in Slack" width="900">
+  <img src="docs/assets/screenshots/slack-production-readiness.png" alt="Code Conductor showing production readiness, PR test state, and application health in Slack" width="900">
 </p>
 
 <p align="center"><sub>Representative Slack rendering of the current Block Kit structure with fictional workspace data.</sub></p>
@@ -36,21 +36,21 @@ monitoring tools. Code Conductor turns those disconnected signals into a shared 
 Ask for the review queue or let Code Conductor post a scheduled recap. Review state is reconciled
 from the active code host so the team can see where attention is needed without leaving chat.
 
-![Code Conductor pull request review queue in Slack](docs/assets/screenshots/review-queue.png)
+![Code Conductor pull request review queue in Slack](docs/assets/screenshots/slack-review-queue.png)
 
 ### Make readiness visible
 
 Code Conductor combines deployment gates, required tests, merged changes, deployment history, and
 current application health into one operational status.
 
-![Code Conductor production readiness summary in Slack](docs/assets/screenshots/production-readiness.png)
+![Code Conductor production readiness summary in Slack](docs/assets/screenshots/slack-production-readiness.png)
 
 ### Deploy and keep watching
 
 Authorized teammates can launch a deployment from chat. Code Conductor follows the provider to
 completion, records the result atomically, announces what shipped, and continues monitoring health.
 
-![Code Conductor automated production deployment in Slack](docs/assets/screenshots/automated-deploy.png)
+![Code Conductor automated production deployment in Slack](docs/assets/screenshots/slack-automated-deploy.png)
 
 > [!NOTE]
 > The screenshots mirror the fields, actions, visibility, two-column layout, and tone accents emitted
