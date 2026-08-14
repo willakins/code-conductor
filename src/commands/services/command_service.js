@@ -441,6 +441,7 @@ function buildRuntimeContext({ serviceOptions, commandContext, defaultDependenci
       mergedOptions.readTimeFormatPreferenceFn || defaultDependencies.readTimeFormatPreferenceFn,
     readTimeZonePreferenceFn:
       mergedOptions.readTimeZonePreferenceFn || defaultDependencies.readTimeZonePreferenceFn,
+    postChannelMessageFn: mergedOptions.postChannelMessageFn || null,
     resolveUserDisplayNameFn:
       mergedOptions.resolveUserDisplayNameFn || defaultDependencies.resolveUserDisplayNameFn,
     resolveCurrentChannelTopicFn:

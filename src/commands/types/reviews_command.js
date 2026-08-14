@@ -47,6 +47,12 @@ class ReviewsCommand extends BaseCalypsoCommand {
       return this.buildRespondParsedCommand(buildUsageMessage());
     }
 
+    if (String(argumentsList[0] || "").toLowerCase() === "send") {
+      return argumentsList.length === 1
+        ? this.buildParsedCommand({ action: "reviews_send_recap" })
+        : this.buildRespondParsedCommand(buildUsageMessage());
+    }
+
     let sawRecentKeyword = false;
     let timeframe = null;
     let githubUser = null;
@@ -116,9 +122,32 @@ class ReviewsCommand extends BaseCalypsoCommand {
     });
   }
 
+  async checkCallerAccess({ parsedCommand, runtime }) {
+    if (parsedCommand.action !== "reviews_send_recap") {
+      return this.allowAccess();
+    }
+
+    const callerIsWorkspaceAdmin = await runtime.isWorkspaceAdminFn(
+      runtime.communicationClient,
+      runtime.userId,
+    );
+    if (!callerIsWorkspaceAdmin) {
+      return this.denyAccess([
+        "Review recap send denied.",
+        "Only workspace admins can send a one-time review recap.",
+      ].join("\n"));
+    }
+
+    return this.allowAccess();
+  }
+
   async execute({ parsedCommand, runtime }) {
     if (!runtime.pool) {
       return this.buildExecutionResult("Reviews command unavailable: database pool is not configured.");
+    }
+
+    if (parsedCommand.action === "reviews_send_recap") {
+      return executeReviewRecapSend({ runtime });
     }
 
     if (parsedCommand.reviewRecapTabKey) {
@@ -204,38 +233,79 @@ class ReviewsCommand extends BaseCalypsoCommand {
   }
 }
 
+async function executeReviewRecapSend({ runtime }) {
+  try {
+    const recapConfig = await runtime.getReviewRecapConfigFn(runtime.pool);
+    if (!recapConfig?.targetChannelId) {
+      return {
+        responseText: "Review recap send unavailable: configure a review recap channel first.",
+      };
+    }
+    if (typeof runtime.postChannelMessageFn !== "function") {
+      return {
+        responseText: "Review recap send unavailable: the communication provider cannot post channel messages.",
+      };
+    }
+
+    const recapOptions = await loadReviewRecapOptions({ recapConfig, runtime });
+
+    await runtime.postChannelMessageFn({
+      channelId: recapConfig.targetChannelId,
+      mrkdwn: true,
+      presentation: buildReviewRecapPresentation(recapOptions),
+      text: formatReviewRecapResponse(recapOptions),
+    });
+
+    return {
+      responseText: "Review recap sent to the configured channel.",
+    };
+  } catch (error) {
+    return {
+      responseText: `Review recap send failed: ${error.message}`,
+    };
+  }
+}
+
 async function executeReviewRecapTab({ parsedCommand, runtime }) {
+  const recapOptions = await loadReviewRecapOptions({ runtime });
+  const selectedTabKey = parsedCommand.reviewRecapTabKey === "summary"
+    ? null
+    : parsedCommand.reviewRecapTabKey;
+  const selectedRecapOptions = {
+    ...recapOptions,
+    page: parsedCommand.reviewRecapPage,
+    selectedTabKey,
+  };
+
+  return {
+    responseText: formatReviewRecapResponse(selectedRecapOptions),
+    presentation: buildReviewRecapPresentation(selectedRecapOptions),
+  };
+}
+
+async function loadReviewRecapOptions({ runtime, recapConfig = null }) {
   const now = new Date();
-  const recapConfig = await runtime.getReviewRecapConfigFn(runtime.pool);
+  const effectiveRecapConfig = recapConfig
+    || await runtime.getReviewRecapConfigFn(runtime.pool);
   const sinceTimestamp = computeReviewRecapSinceTimestamp({
     now,
-    reviewScope: recapConfig.reviewScope,
-    recencyValue: recapConfig.recencyValue,
-    recencyUnit: recapConfig.recencyUnit,
+    reviewScope: effectiveRecapConfig.reviewScope,
+    recencyValue: effectiveRecapConfig.recencyValue,
+    recencyUnit: effectiveRecapConfig.recencyUnit,
   });
   const pullRequests = await runtime.listOpenPullRequestsForReviewRecapSinceFn(
     runtime.pool,
     sinceTimestamp,
     new Date(now.getTime() - REVIEW_RECAP_BACKBURNER_AGE_MS),
   );
-  const timeZone = recapConfig.timeZone || await runtime.readTimeZonePreferenceFn(runtime);
-  const selectedTabKey = parsedCommand.reviewRecapTabKey === "summary"
-    ? null
-    : parsedCommand.reviewRecapTabKey;
-  const recapOptions = {
-    now,
-    page: parsedCommand.reviewRecapPage,
-    pullRequests,
-    recencyUnit: recapConfig.recencyUnit,
-    recencyValue: recapConfig.recencyValue,
-    reviewScope: recapConfig.reviewScope,
-    selectedTabKey,
-    timeZone,
-  };
-
   return {
-    responseText: formatReviewRecapResponse(recapOptions),
-    presentation: buildReviewRecapPresentation(recapOptions),
+    now,
+    pullRequests,
+    recencyUnit: effectiveRecapConfig.recencyUnit,
+    recencyValue: effectiveRecapConfig.recencyValue,
+    reviewScope: effectiveRecapConfig.reviewScope,
+    timeZone: effectiveRecapConfig.timeZone
+      || await runtime.readTimeZonePreferenceFn(runtime),
   };
 }
 
@@ -261,6 +331,7 @@ function buildUsageMessage() {
     "`/conductor reviews <day|week|month>`",
     "`/conductor reviews recent <day|week|month>`",
     "`/conductor reviews <GITHUB_USER> <day|week|month>`",
+    "`/conductor reviews send` (workspace admins only)",
   ].join("\n");
 }
 

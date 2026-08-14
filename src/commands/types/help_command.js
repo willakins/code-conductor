@@ -95,6 +95,7 @@ function buildReviewsHelpText(botName) {
     "`/conductor reviews <GITHUB_USER>` Filter by PR author.",
     "`/conductor reviews <day|week|month>` Filter by recency window.",
     "`/conductor reviews recent <day|week|month>` Explicit recent-window form.",
+    "`/conductor reviews send` Post one recap now to the configured channel (workspace admins only).",
     "`/conductor sync` Run immediate sync with code host.",
     "",
     "*Recap Config*",

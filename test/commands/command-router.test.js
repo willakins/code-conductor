@@ -51,6 +51,7 @@ test("handleCalypsoCommand returns reviews topic help for reviewing alias", () =
   assert.equal(result.action, "respond");
   assert.match(result.responseText, /\*Code Conductor Reviews Help\*/);
   assert.match(result.responseText, /\/conductor reviews <GITHUB_USER>/);
+  assert.match(result.responseText, /\/conductor reviews send/);
   assert.match(result.responseText, /\/conductor config review-recap-window:<all\|last-day\|last-week\|last-month>/);
   assert.match(result.responseText, /\/conductor config review-recap-schedule:<daily\|weekday>@HH:MM\[,HH:MM\.\.\.\]/);
   assert.match(result.responseText, /\/conductor config timezone:America\/New_York/);
@@ -139,6 +140,15 @@ test("handleCalypsoCommand routes review recap tab actions", () => {
   assert.equal(result.action, "reviews_list");
   assert.equal(result.reviewRecapTabKey, "backburner");
   assert.equal(result.reviewRecapPage, 2);
+});
+
+test("handleCalypsoCommand routes one-time review recap sends", () => {
+  const result = handleCalypsoCommand({
+    text: "reviews send",
+    user_id: "UADMIN",
+  });
+
+  assert.equal(result.action, "reviews_send_recap");
 });
 
 test("handleCalypsoCommand routes reviews input with github user", () => {
@@ -938,6 +948,174 @@ test("registerCalypsoCommand opens a paginated recap tab", async () => {
   assert.match(renderedBlocks, /#208  Approved 9/);
   assert.doesNotMatch(renderedBlocks, /#200  Approved 1/);
   assert.match(renderedBlocks, /reviews tab:approved page:2/);
+});
+
+test("registerCalypsoCommand denies one-time review recap sends for non-admins", async () => {
+  let commandHandler;
+  const postCalls = [];
+  const app = {
+    command(_name, handler) {
+      commandHandler = handler;
+    },
+  };
+
+  registerCalypsoCommand(app, {
+    pool: {},
+    isWorkspaceAdminFn: async () => false,
+    postChannelMessageFn: async (message) => postCalls.push(message),
+  });
+
+  let payload;
+  await commandHandler({
+    command: { text: "reviews send", user_id: "U123" },
+    client: {},
+    ack: async () => {},
+    respond: async (message) => {
+      payload = message;
+    },
+  });
+
+  assert.equal(payload.response_type, "ephemeral");
+  assert.match(payload.text, /Review recap send denied/);
+  assert.match(payload.text, /Only workspace admins can send a one-time review recap/);
+  assert.equal(postCalls.length, 0);
+});
+
+test("registerCalypsoCommand lets admins post one review recap without consuming a scheduled slot", async () => {
+  let commandHandler;
+  let markedScheduledSlot = false;
+  const postCalls = [];
+  const commandClient = {};
+  const app = {
+    command(_name, handler) {
+      commandHandler = handler;
+    },
+  };
+
+  registerCalypsoCommand(app, {
+    pool: {},
+    getReviewRecapConfigFn: async () => ({
+      targetChannelId: "C_REVIEW",
+      reviewScope: "all",
+      recencyValue: 1,
+      recencyUnit: "w",
+      timeZone: "America/New_York",
+    }),
+    isWorkspaceAdminFn: async (client, userId) => {
+      assert.equal(client, commandClient);
+      assert.equal(userId, "UADMIN");
+      return true;
+    },
+    listOpenPullRequestsForReviewRecapSinceFn: async () => [{
+      repo: "croft-eng/croft",
+      pr_number: 210,
+      title: "Ready for a human",
+      url: "https://github.com/croft-eng/croft/pull/210",
+      author_login: "octocat",
+      review_state: "waiting",
+      codex_approved: true,
+      last_modified_at: new Date().toISOString(),
+    }],
+    markReviewRecapSentFn: async () => {
+      markedScheduledSlot = true;
+    },
+    postChannelMessageFn: async (message) => postCalls.push(message),
+  });
+
+  let payload;
+  await commandHandler({
+    command: { text: "reviews send", user_id: "UADMIN" },
+    client: commandClient,
+    ack: async () => {},
+    respond: async (message) => {
+      payload = message;
+    },
+  });
+
+  assert.equal(payload.response_type, "ephemeral");
+  assert.equal(payload.text, "Review recap sent to the configured channel.");
+  assert.equal(postCalls.length, 1);
+  assert.equal(postCalls[0].channelId, "C_REVIEW");
+  assert.equal(postCalls[0].mrkdwn, true);
+  assert.match(postCalls[0].text, /PR Review Recap/);
+  assert.equal(postCalls[0].presentation.title, "PR review recap");
+  assert.match(JSON.stringify(postCalls[0].presentation), /Human approval \(1\)/);
+  assert.equal(markedScheduledSlot, false);
+});
+
+test("registerCalypsoCommand explains when one-time review recap delivery is not configured", async () => {
+  let commandHandler;
+  let listCalled = false;
+  const app = {
+    command(_name, handler) {
+      commandHandler = handler;
+    },
+  };
+
+  registerCalypsoCommand(app, {
+    pool: {},
+    getReviewRecapConfigFn: async () => ({ targetChannelId: null }),
+    isWorkspaceAdminFn: async () => true,
+    listOpenPullRequestsForReviewRecapSinceFn: async () => {
+      listCalled = true;
+      return [];
+    },
+    postChannelMessageFn: async () => {
+      throw new Error("should not post without a configured channel");
+    },
+  });
+
+  let payload;
+  await commandHandler({
+    command: { text: "reviews send", user_id: "UADMIN" },
+    client: {},
+    ack: async () => {},
+    respond: async (message) => {
+      payload = message;
+    },
+  });
+
+  assert.equal(payload.response_type, "ephemeral");
+  assert.match(payload.text, /configure a review recap channel first/);
+  assert.equal(listCalled, false);
+});
+
+test("registerCalypsoCommand reports one-time review recap delivery failures", async () => {
+  let commandHandler;
+  const app = {
+    command(_name, handler) {
+      commandHandler = handler;
+    },
+  };
+
+  registerCalypsoCommand(app, {
+    pool: {},
+    getReviewRecapConfigFn: async () => ({
+      targetChannelId: "C_REVIEW",
+      reviewScope: "all",
+      recencyValue: 1,
+      recencyUnit: "w",
+      timeZone: "America/New_York",
+    }),
+    isWorkspaceAdminFn: async () => true,
+    listOpenPullRequestsForReviewRecapSinceFn: async () => [],
+    postChannelMessageFn: async () => {
+      throw new Error("not_in_channel");
+    },
+  });
+
+  let payload;
+  await commandHandler({
+    command: { text: "reviews send", user_id: "UADMIN" },
+    client: {},
+    ack: async () => {},
+    respond: async (message) => {
+      payload = message;
+    },
+  });
+
+  assert.equal(payload.response_type, "ephemeral");
+  assert.match(payload.text, /Review recap send failed: not_in_channel/);
 });
 
 test("registerCalypsoCommand filters waiting reviews by github user", async () => {

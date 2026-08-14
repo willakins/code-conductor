@@ -117,6 +117,8 @@ function wireCommunicationCommands(runtime) {
     aiSupportEmailSystemPrompt: runtime.config.aiSupportEmailSystemPrompt,
     pool: runtime.pool,
     deployPlatform: runtime.deployPlatform,
+    postChannelMessageFn: (message) =>
+      runtime.communicationPlatform.postChannelMessage(message),
     isWorkspaceAdminFn: async (_communicationClient, userId) =>
       runtime.communicationPlatform.isWorkspaceAdmin(userId),
     deployConfig: buildDeployConfig(runtime.config),
