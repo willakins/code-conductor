@@ -240,6 +240,7 @@ function mapPullRequestLifecyclePayload(payload) {
     authorLogin: readBitbucketUserLogin(pullRequest.author?.user),
     baseBranch: pullRequest.destination?.branch?.name || "",
     openedAt: createdAt,
+    lastModifiedAt: updatedAt,
     lastReviewedAt: null,
   };
 

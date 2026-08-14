@@ -504,6 +504,7 @@ test("github webhook tracks opened pull request review lifecycle", async () => {
   assert.equal(savedReviewState.reviewState, "waiting");
   assert.equal(savedReviewState.lifecycleState, "open");
   assert.equal(savedReviewState.openedForReviewAt, "2026-02-13T17:00:00Z");
+  assert.equal(savedReviewState.lastModifiedAt, "2026-02-13T17:00:00Z");
   assert.equal(res.body.review_tracking_updated, true);
 });
 
@@ -539,6 +540,7 @@ test("github webhook tracks ready_for_review transitions", async () => {
   assert.equal(savedReviewState.isDraft, false);
   assert.equal(savedReviewState.reviewState, "waiting");
   assert.equal(savedReviewState.openedForReviewAt, "2026-02-14T11:00:00Z");
+  assert.equal(savedReviewState.lastModifiedAt, "2026-02-14T11:00:00Z");
 });
 
 test("github webhook upserts merged main PR as untested while updating review state", async () => {

@@ -103,6 +103,7 @@ async function mapOpenPullRequestToReviewState({
     closedAt: null,
     mergedAt: null,
     lastReviewedAt: extractLatestReviewTimestamp(reviews),
+    lastModifiedAt: pullRequest?.updated_at || openedAt,
   };
 }
 

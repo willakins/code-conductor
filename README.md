@@ -1155,12 +1155,16 @@ Rules:
 - Checks once per minute for configured recap slot (`daily@HH:MM` or `<weekday>@HH:MM`).
 - Optionally skips scheduled recap posts on weekends and/or observed US federal holidays.
 - Posts in-channel message in configured `review-recap-channel` containing:
-  - Header: `PR Review Recap — {scope}`
-  - Bold sections in priority order:
-    - `Approved By Reviewers (Unmerged)`
-    - `Codex Approved, Waiting On Human Approval`
-    - `Other Open Pull Requests`
-  - Multi-line PR rows with PR reference, title, author, review state, Codex state, and `Last modified` date (`M/D/YYYY`).
+  - A Slack Block Kit or Microsoft Teams Adaptive Card summary with open, active, and backburner counts.
+  - Four interactive category tabs in priority order:
+    - `Approved, unmerged`
+    - `Waiting on human approval` (Codex approved, human approval pending)
+    - `Unapproved`
+    - `Backburner` (last modified more than 30 days ago, regardless of approval state)
+  - Clicking a tab opens its compact PR rows with PR reference, title, author, status, and last-modified date (`M/D/YYYY`).
+  - Tab views are paginated at eight PRs with `Previous`, `Next`, and `All tabs` navigation.
+  - Backburner PRs remain available even when the active recap scope is limited to the last day, week, or month.
+  - Plain-text fallback with the same categories for providers that cannot render rich cards.
 - Includes empty state (`• No open non-draft pull requests in scope.`) when no PRs match.
 - PR matching rule:
   - `lifecycle_state = open`
