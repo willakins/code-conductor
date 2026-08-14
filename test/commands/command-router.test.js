@@ -25,11 +25,26 @@ test("handleCalypsoCommand returns help for help input", () => {
   assert.match(result.responseText, /\/conductor help config/);
 });
 
-test("handleCalypsoCommand uses configured bot name in help header", () => {
+test("handleCalypsoCommand uses configured bot name in help header and commands", () => {
   const result = handleCalypsoCommand({ text: "help", user_id: "U123", botName: "Voyager" });
 
   assert.equal(result.action, "respond");
   assert.match(result.responseText, /^\*Voyager\*/);
+  assert.match(result.responseText, /\/voyager status/);
+  assert.match(result.responseText, /\/voyager help deploy/);
+  assert.doesNotMatch(result.responseText, /\/conductor/);
+});
+
+test("handleCalypsoCommand uses configured bot name in help topic usage", () => {
+  const result = handleCalypsoCommand({
+    text: "help unknown",
+    user_id: "U123",
+    botName: "Calypso",
+  });
+
+  assert.equal(result.action, "respond");
+  assert.match(result.responseText, /\/calypso help deploy/);
+  assert.doesNotMatch(result.responseText, /\/conductor/);
 });
 
 test("handleCalypsoCommand returns deploy topic help for testing alias", () => {
@@ -517,7 +532,7 @@ test("handleCalypsoCommand rejects tested command with injection-like payload", 
   assert.match(result.responseText, /Usage:/);
 });
 
-test("registerCalypsoCommand registers /conductor and responds ephemerally", async () => {
+test("registerCalypsoCommand registers aliases and renders help once", async () => {
   const commandHandlers = new Map();
 
   const app = {
@@ -547,12 +562,37 @@ test("registerCalypsoCommand registers /conductor and responds ephemerally", asy
 
   assert.equal(ackCalled, true);
   assert.equal(payload.response_type, "ephemeral");
-  assert.match(payload.text, /\/conductor help/);
-  assert.match(payload.text, /\/conductor status/);
-  assert.match(payload.text, /Modules/);
-  assert.match(payload.text, /\/conductor help monitoring/);
+  assert.equal(payload.text, undefined);
+  assert.match(payload.attachments[0].fallback, /\/conductor status/);
+  assert.match(payload.attachments[0].fallback, /Modules/);
+  assert.match(payload.attachments[0].fallback, /\/conductor help monitoring/);
   assert.match(readSlackBlocks(payload)[0].text.text, /Code Conductor help/);
   assert.ok(readSlackBlocks(payload).some((block) => block.type === "divider"));
+});
+
+test("registerCalypsoCommand registers and presents a custom bot command name", async () => {
+  const commandHandlers = new Map();
+  registerCalypsoCommand({
+    command(name, handler) {
+      commandHandlers.set(name, handler);
+    },
+  }, { botName: "Voyager" });
+
+  assert.equal(commandHandlers.has("/voyager"), true);
+
+  let payload;
+  await commandHandlers.get("/voyager")({
+    command: { text: "help", user_id: "U123" },
+    ack: async () => {},
+    respond: async (message) => {
+      payload = message;
+    },
+  });
+
+  assert.equal(payload.text, undefined);
+  assert.match(payload.attachments[0].fallback, /\/voyager status/);
+  assert.doesNotMatch(payload.attachments[0].fallback, /\/conductor/);
+  assert.match(readSlackBlocks(payload)[0].text.text, /Voyager help/);
 });
 
 test("registerCalypsoCommand runs sync command and returns summary", async () => {
@@ -901,6 +941,7 @@ test("registerCalypsoCommand shows open waiting reviews without filters", async 
   );
   assert.match(reviewRow.fields[0].text, /#55  Add observability/);
   assert.match(reviewRow.fields[1].text, /Review requested/);
+  assert.doesNotMatch(JSON.stringify(reviewBlocks), /⚠️|🔀/);
 });
 
 test("registerCalypsoCommand opens a paginated recap tab", async () => {

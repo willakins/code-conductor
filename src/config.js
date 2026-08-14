@@ -1,4 +1,5 @@
 const dotenv = require("dotenv");
+const { DEFAULT_BOT_NAME } = require("./shared/bot_command");
 
 dotenv.config({ quiet: true });
 
@@ -32,7 +33,6 @@ const DEFAULT_DEPLOY_PROVIDER = DEPLOY_PROVIDERS.digitalocean;
 const DEFAULT_EMAIL_PROVIDER = EMAIL_PROVIDERS.gmail;
 const DEFAULT_AI_PROVIDER = AI_PROVIDERS.openai;
 const DEFAULT_ERROR_TRACKING_PROVIDER = ERROR_TRACKING_PROVIDERS.sentry;
-const DEFAULT_BOT_NAME = "Code Conductor";
 const DEFAULT_CODE_HOST_OPEN_PR_SYNC_INTERVAL_HOURS = 24;
 const DEFAULT_COMMUNICATION_COMMAND_PATH = "/communication/commands";
 const DEFAULT_GITHUB_API_BASE_URL = "https://api.github.com";

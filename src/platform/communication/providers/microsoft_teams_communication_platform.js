@@ -5,6 +5,7 @@ const {
 } = require("../deploy_prod_tip");
 const { BaseCommunicationPlatform } = require("../base_communication_platform");
 const { buildCommunicationMessage } = require("../message_renderer");
+const { resolveBotCommandPrefix } = require("../../../shared/bot_command");
 
 const DEFAULT_TEAMS_COMMAND_PATH = "/communication/commands";
 
@@ -83,11 +84,16 @@ class MicrosoftTeamsCommunicationPlatform extends BaseCommunicationPlatform {
           },
         });
 
-        const finalResponse = responses[responses.length - 1];
+        const finalResponse = responses[responses.length - 1] || {};
+        const hasRichResponse = Array.isArray(finalResponse.attachments);
         response.status(200).json({
           type: "message",
-          text: finalResponse?.text || `${this.botName} command completed.`,
-          ...(Array.isArray(finalResponse?.attachments)
+          ...(Object.hasOwn(finalResponse, "text")
+            ? { text: finalResponse.text }
+            : hasRichResponse
+              ? {}
+              : { text: `${this.botName} command completed.` }),
+          ...(hasRichResponse
             ? { attachments: finalResponse.attachments }
             : {}),
         });
@@ -249,9 +255,19 @@ function stripBotPrefix(rawText, botName) {
     return "";
   }
 
-  const commandPrefixMatch = normalizedText.match(/^\/(?:conductor|calypso)\s*(.*)$/i);
+  const commandPrefixMatch = normalizedText.match(
+    /^\/(?:conductor|calypso)(?:\s+(.*))?$/i,
+  );
   if (commandPrefixMatch) {
-    return commandPrefixMatch[1].trim();
+    return String(commandPrefixMatch[1] || "").trim();
+  }
+
+  const escapedConfiguredCommandPrefix = escapeRegex(resolveBotCommandPrefix(botName));
+  const configuredCommandPrefixMatch = normalizedText.match(
+    new RegExp(`^${escapedConfiguredCommandPrefix}(?:\\s+(.*))?$`, "i"),
+  );
+  if (configuredCommandPrefixMatch) {
+    return String(configuredCommandPrefixMatch[1] || "").trim();
   }
 
   const escapedBotName = escapeRegex(String(botName || "").trim());
@@ -259,9 +275,11 @@ function stripBotPrefix(rawText, botName) {
     return normalizedText;
   }
 
-  const slashPrefixMatch = normalizedText.match(new RegExp(`^\\/${escapedBotName}\\s*(.*)$`, "i"));
+  const slashPrefixMatch = normalizedText.match(
+    new RegExp(`^\\/${escapedBotName}(?:\\s+(.*))?$`, "i"),
+  );
   if (slashPrefixMatch) {
-    return slashPrefixMatch[1].trim();
+    return String(slashPrefixMatch[1] || "").trim();
   }
 
   const plainPrefixMatch = normalizedText.match(new RegExp(`^${escapedBotName}\\s+(.*)$`, "i"));

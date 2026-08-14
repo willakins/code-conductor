@@ -31,27 +31,28 @@ const TONE_STYLES = {
 };
 
 function buildCommunicationMessage({ provider, text, presentation }) {
-  const payload = {
-    text: String(text || ""),
-  };
+  const plainText = String(text || "");
+  const payload = { text: plainText };
   const normalizedPresentation = normalizePresentation(presentation);
   if (!normalizedPresentation) {
     return payload;
   }
 
+  const richMessagePayload = normalizedPresentation.suppressPlainText ? {} : payload;
+
   if (normalizeProvider(provider) === "microsoft_teams") {
     return {
-      ...payload,
-      attachments: [buildTeamsAdaptiveCard(normalizedPresentation)],
+      ...richMessagePayload,
+      attachments: [buildTeamsAdaptiveCard(normalizedPresentation, plainText)],
     };
   }
 
   const toneStyle = resolveToneStyle(normalizedPresentation.tone);
   return {
-    ...payload,
+    ...richMessagePayload,
     attachments: [{
       color: toneStyle.slackColor,
-      fallback: normalizedPresentation.title,
+      fallback: plainText || normalizedPresentation.title,
       blocks: buildSlackBlocks(normalizedPresentation),
     }],
   };
@@ -154,7 +155,7 @@ function buildSlackBlocks(presentation) {
   return fitSlackBlocks(blocks, trailingBlocks);
 }
 
-function buildTeamsAdaptiveCard(presentation) {
+function buildTeamsAdaptiveCard(presentation, fallbackText) {
   const toneStyle = resolveToneStyle(presentation.tone);
   const showHeaderIcon = presentation.showHeaderIcon || !presentation.status;
   const body = [
@@ -236,6 +237,7 @@ function buildTeamsAdaptiveCard(presentation) {
       type: "AdaptiveCard",
       $schema: "http://adaptivecards.io/schemas/adaptive-card.json",
       version: "1.4",
+      ...(fallbackText ? { fallbackText } : {}),
       body,
     },
   };
@@ -401,9 +403,10 @@ function buildSlackRow(item) {
 
   if (item.status) {
     const statusStyle = resolveToneStyle(item.statusTone);
+    const statusIcon = item.showStatusIcon ? `${statusStyle.icon} ` : "";
     fields.push({
       type: "mrkdwn",
-      text: `${statusStyle.icon} *${item.status}*`.slice(0, 2000),
+      text: `${statusIcon}*${item.status}*`.slice(0, 2000),
     });
   }
 
@@ -434,7 +437,7 @@ function formatSlackItem(item) {
     : item.title;
   const titleWithIcon = [item.icon, title].filter(Boolean).join(" ");
   const status = item.status
-    ? `${resolveToneStyle(item.statusTone).icon} ${item.status}`
+    ? `${item.showStatusIcon ? `${resolveToneStyle(item.statusTone).icon} ` : ""}${item.status}`
     : "";
   if (item.inlineDescription && item.description) {
     return `• ${titleWithIcon} ${item.description}${status ? ` · ${status}` : ""}`;
@@ -453,7 +456,7 @@ function formatTeamsItem(item) {
     : item.title;
   const titleWithIcon = [item.icon, title].filter(Boolean).join(" ");
   const status = item.status
-    ? `${resolveToneStyle(item.statusTone).icon} ${item.status}`
+    ? `${item.showStatusIcon ? `${resolveToneStyle(item.statusTone).icon} ` : ""}${item.status}`
     : "";
   if (item.inlineDescription && item.description) {
     return `• ${titleWithIcon} ${convertSlackMarkupToTeams(item.description)}${
@@ -487,6 +490,7 @@ function normalizePresentation(presentation) {
       ? "after_sections"
       : "before_sections",
     showHeaderIcon: presentation.showHeaderIcon === true,
+    suppressPlainText: presentation.suppressPlainText === true,
     summary: normalizeText(presentation.summary),
     status: normalizePresentationStatus(presentation.status),
     context: normalizeText(presentation.context),
@@ -568,6 +572,7 @@ function normalizePresentationItems(items) {
       description: normalizeText(item?.description),
       inlineDescription: item?.inlineDescription === true,
       status: normalizeText(item?.status),
+      showStatusIcon: item?.showStatusIcon !== false,
       statusTone: normalizeText(item?.statusTone) || "neutral",
     }))
     .filter((item) => item.title);

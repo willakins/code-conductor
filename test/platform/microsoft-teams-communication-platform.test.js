@@ -48,8 +48,12 @@ test("microsoft teams platform registers command route and responds", async () =
   );
 
   assert.equal(response.statusCode, 200);
-  assert.match(response.payload.text, /\/conductor help/);
+  assert.equal(response.payload.text, undefined);
   assert.equal(response.payload.attachments.length, 1);
+  assert.match(
+    response.payload.attachments[0].content.fallbackText,
+    /\/conductor help/,
+  );
   assert.match(
     JSON.stringify(response.payload.attachments[0].content.body),
     /Code Conductor help/,
@@ -84,7 +88,11 @@ test("microsoft teams platform accepts Adaptive Card submitted commands", async 
   );
 
   assert.equal(response.statusCode, 200);
-  assert.match(response.payload.text, /\/conductor status/);
+  assert.equal(response.payload.text, undefined);
+  assert.match(
+    response.payload.attachments[0].content.fallbackText,
+    /\/conductor status/,
+  );
 });
 
 test("microsoft teams platform renders status as an adaptive card", async () => {
@@ -210,7 +218,77 @@ test("microsoft teams platform strips configured bot prefix", async () => {
   );
 
   assert.equal(response.statusCode, 200);
-  assert.match(response.payload.text, /\*Voyager\*/);
+  assert.equal(response.payload.text, undefined);
+  assert.match(
+    response.payload.attachments[0].content.fallbackText,
+    /\/voyager status/,
+  );
+  assert.doesNotMatch(
+    response.payload.attachments[0].content.fallbackText,
+    /\/conductor/,
+  );
+});
+
+test("microsoft teams platform strips a kebab-cased multiword bot prefix", async () => {
+  const platform = new MicrosoftTeamsCommunicationPlatform({
+    config: { botName: "Release Bot" },
+  });
+  platform.registerCalypsoCommand({ pool: {} });
+  const routes = [];
+  platform.registerHttpRoutes({
+    post(path, handler) {
+      routes.push({ path, handler });
+    },
+  });
+
+  const response = createResponseRecorder();
+  await routes[0].handler(
+    {
+      body: {
+        text: "/release-bot help",
+        from: { id: "U123", name: "Will" },
+      },
+      headers: {},
+    },
+    response,
+  );
+
+  assert.equal(response.statusCode, 200);
+  assert.match(
+    response.payload.attachments[0].content.fallbackText,
+    /\/release-bot status/,
+  );
+});
+
+test("microsoft teams platform does not partially match a legacy command prefix", async () => {
+  const platform = new MicrosoftTeamsCommunicationPlatform({
+    config: { botName: "Calypso Ops" },
+  });
+  platform.registerCalypsoCommand({ pool: {} });
+  const routes = [];
+  platform.registerHttpRoutes({
+    post(path, handler) {
+      routes.push({ path, handler });
+    },
+  });
+
+  const response = createResponseRecorder();
+  await routes[0].handler(
+    {
+      body: {
+        text: "/calypso-ops help",
+        from: { id: "U123", name: "Will" },
+      },
+      headers: {},
+    },
+    response,
+  );
+
+  assert.equal(response.statusCode, 200);
+  assert.match(
+    response.payload.attachments[0].content.fallbackText,
+    /\/calypso-ops status/,
+  );
 });
 
 test("microsoft teams platform returns deploy prod tip for matching text", async () => {

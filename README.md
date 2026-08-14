@@ -418,6 +418,9 @@ Provider support matrix:
 `BOT_NAME`
 
 - Display name used in bot-generated help and error messages.
+- Help command examples use a lowercase, kebab-cased version of this name (for example,
+  `Calypso` uses `/calypso`). The default `Code Conductor` name continues to use `/conductor`.
+- Slack workspaces using a custom name must register the matching slash command.
 - Default: `Code Conductor`.
 
 `COMMUNICATION_BOT_TOKEN`
