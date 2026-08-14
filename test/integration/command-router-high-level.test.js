@@ -144,7 +144,7 @@ test("high-level command lifecycle: status -> confirmed deploy -> status", async
   );
   assert.match(
     changesIncludedBlock.text.text,
-    /<https:\/\/github\.com\/croft-eng\/croft\/pull\/700\|Feature PR> by <@U123ABC> · croft-eng\/croft#700 · Included/,
+    /<https:\/\/github\.com\/croft-eng\/croft\/pull\/700\|Feature PR> by <@U123ABC> · Included/,
   );
   assert.equal(
     deployStartedBlocks.filter((block) =>

@@ -261,7 +261,7 @@ class DeployCommand extends BaseCalypsoCommand {
         : "";
       const missingDeploymentIdText =
         isProductionDeploy && !externalDeploymentId
-          ? "Code Conductor will not mark PRs deployed automatically because the deploy provider did not return a deployment id."
+          ? `${runtime.botName} will not mark PRs deployed automatically because the deploy provider did not return a deployment id.`
           : "";
 
       if (!isProductionDeploy) {
@@ -274,6 +274,7 @@ class DeployCommand extends BaseCalypsoCommand {
             shouldNotifyDeploymentCompletion,
             deployConfigOverrides: this.buildDeployConfigOverridesForCompletion(deployConfiguration),
             presentation: buildDeploymentStartedPresentation({
+              botName: runtime.botName,
               deployAppId: deployConfiguration.deployProductionAppId,
               deployEnvironment,
               deployProvider,
@@ -307,6 +308,7 @@ class DeployCommand extends BaseCalypsoCommand {
             productionDeploymentPlan,
           }),
           presentation: buildDeploymentStartedPresentation({
+            botName: runtime.botName,
             deployAppId: deployConfiguration.deployProductionAppId,
             deployEnvironment,
             deployProvider,
@@ -720,6 +722,7 @@ function buildBlockedDeploymentPresentation(blockingPullRequests, gateDecision) 
 }
 
 function buildDeploymentStartedPresentation({
+  botName,
   deployAppId,
   deployEnvironment,
   deployProvider,
@@ -748,7 +751,7 @@ function buildDeploymentStartedPresentation({
             slackUsernameByGithubUsername instanceof Map
               ? slackUsernameByGithubUsername
               : new Map(),
-        })} · ${pullRequest?.repo}#${pullRequest?.pr_number} · ${
+        })} · ${
           pullRequest?.tested ? "Tested" : "Included"
         }`,
         inlineDescription: true,
@@ -776,9 +779,9 @@ function buildDeploymentStartedPresentation({
     ],
     sections,
     context: missingDeploymentIdText
-      ? "Code Conductor will not update deployment state automatically."
+      ? `${botName} will not update deployment state automatically.`
       : shouldNotifyDeploymentCompletion
-        ? "Code Conductor will post again when the provider reports completion."
+        ? `${botName} will post again when the provider reports completion.`
         : "The deployment was handed off to the configured provider.",
   };
 }
