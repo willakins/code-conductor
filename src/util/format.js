@@ -34,7 +34,7 @@ const REVIEW_RECAP_SECTION_DEFINITIONS = Object.freeze([
     key: REVIEW_RECAP_CATEGORY_KEYS.unapproved,
     title: "Unapproved",
     actionLabel: "Unapproved",
-    icon: "⚠️",
+    icon: "",
     status: "Review needed",
     statusTone: "warning",
   },
@@ -153,8 +153,9 @@ function formatReviewRecapResponse({
     header,
     ...displayedSections.flatMap((section) => [
       "",
-      `*${section.icon} ${section.title} · ${section.totalPullRequestCount
-        || section.pullRequests.length}*`,
+      `*${[section.icon, section.title].filter(Boolean).join(" ")} · ${
+        section.totalPullRequestCount || section.pullRequests.length
+      }*`,
       ...section.pullRequests.map((pullRequest) =>
         formatReviewRecapPullRequestLine({ pullRequest, timeZone }),
       ),
@@ -207,10 +208,11 @@ function buildReviewRecapPresentation({
     status: {
       label: `${normalizedPullRequests.length} open`,
       detail: `${activeCount} active · ${backburnerCount} backburner`,
+      showIcon: activeCount === 0,
       tone: activeCount > 0 ? "warning" : "success",
     },
     facts: REVIEW_RECAP_SECTION_DEFINITIONS.map((definition) => ({
-      label: `${definition.icon} ${definition.title}`,
+      label: [definition.icon, definition.title].filter(Boolean).join(" "),
       value: String(
         sections.find((section) => section.key === definition.key)?.pullRequests.length || 0,
       ),
@@ -218,7 +220,9 @@ function buildReviewRecapPresentation({
     sections: selectedSection
       ? [{
           layout: "rows",
-          title: `${selectedSection.icon} ${selectedSection.title}  ·  ${selectedSection.pullRequests.length}`,
+          title: `${[selectedSection.icon, selectedSection.title]
+            .filter(Boolean)
+            .join(" ")}  ·  ${selectedSection.pullRequests.length}`,
           items: selectedPage.pullRequests.map((pullRequest) =>
             buildReviewRecapPresentationItem({
               pullRequest,
@@ -478,13 +482,13 @@ function buildReviewRecapPresentationItem({ pullRequest, section, timeZone }) {
   const hasChangesRequested = String(pullRequest?.review_state || "").toLowerCase().trim()
     === "changes_requested";
   return {
-    icon: "🔀",
     title: `#${pullRequest.pr_number}  ${pullRequest.title || "(untitled)"}`,
     url: pullRequest.url || "",
     description: `by ${pullRequest.author_login || "unknown"} · modified ${formatReviewPullRequestModifiedDate({
       pullRequest,
       timeZone,
     })}`,
+    showStatusIcon: hasChangesRequested || section.statusTone !== "warning",
     status: hasChangesRequested ? "Changes requested" : section.status,
     statusTone: hasChangesRequested ? "danger" : section.statusTone,
   };

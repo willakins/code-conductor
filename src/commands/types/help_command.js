@@ -1,20 +1,66 @@
 const { BaseCalypsoCommand } = require("./base_command");
 const { DEFAULT_BOT_NAME } = require("../../config");
+const { resolveBotCommandPrefix } = require("../../shared/bot_command");
+const {
+  buildDefaultCommandPresentation,
+} = require("../presentation/default_command_presentation");
 
 class HelpCommand extends BaseCalypsoCommand {
   constructor(options = {}) {
     super("help");
     this.botName = String(options.botName || DEFAULT_BOT_NAME);
+    this.commandPrefix = resolveBotCommandPrefix(this.botName);
   }
 
   parse({ commandWords }) {
     const topic = normalizeHelpTopic(commandWords[1]);
     if (commandWords.length > 2 || topic === null) {
-      return this.buildRespondParsedCommand(buildHelpTopicUsageMessage());
+      return this.buildRespondParsedCommand(
+        renderCommandPrefix(buildHelpTopicUsageMessage(), this.commandPrefix),
+      );
     }
 
-    return this.buildRespondParsedCommand(buildHelpText(this.botName, topic));
+    return this.buildParsedCommand({
+      action: "respond",
+      helpTopic: topic,
+      responseText: renderCommandPrefix(
+        buildHelpText(this.botName, topic),
+        this.commandPrefix,
+      ),
+    });
   }
+
+  async execute({ parsedCommand }) {
+    const presentation = buildDefaultCommandPresentation({
+      commandName: "help",
+      responseText: parsedCommand.responseText,
+    });
+
+    return this.buildExecutionResult(parsedCommand.responseText, {
+      presentation: {
+        ...presentation,
+        suppressPlainText: true,
+        title: buildHelpPresentationTitle(
+          this.botName,
+          parsedCommand.helpTopic,
+          parsedCommand.responseText,
+        ),
+      },
+    });
+  }
+}
+
+function renderCommandPrefix(helpText, commandPrefix) {
+  return String(helpText || "").replaceAll("/conductor", commandPrefix);
+}
+
+function buildHelpPresentationTitle(botName, topic, responseText) {
+  if (!topic || topic === "overview") {
+    return `${botName} help`;
+  }
+
+  const heading = String(responseText || "").match(/^\*([^*]+)\*/)?.[1];
+  return heading ? heading.replace(/ Help$/, " help") : `${botName} help`;
 }
 
 function buildHelpText(botName, topic) {

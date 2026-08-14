@@ -203,6 +203,7 @@ class ReviewsCommand extends BaseCalypsoCommand {
               ? "needs attention"
               : "need attention"}`,
             label: `${sortedPullRequests.length} open`,
+            showIcon: false,
             tone: "warning",
           },
           facts: [
@@ -216,10 +217,10 @@ class ReviewsCommand extends BaseCalypsoCommand {
             layout: "rows",
             title: section.title,
             items: section.pullRequests.map((pullRequest) => ({
-              icon: "🔀",
               title: `#${pullRequest.pr_number}  ${pullRequest.title || "(untitled)"}`,
               url: pullRequest.url || "",
               description: `${pullRequest.repo} · by ${pullRequest.author_login || "unknown"}`,
+              showStatusIcon: pullRequest.review_state === "changes_requested",
               status: formatReviewStatus(pullRequest.review_state),
               statusTone: pullRequest.review_state === "changes_requested"
                 ? "danger"

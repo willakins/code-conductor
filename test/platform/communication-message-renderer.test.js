@@ -47,6 +47,38 @@ test("communication message renderer builds Slack blocks with plain-text fallbac
   );
 });
 
+test("communication message renderer can keep plain text as attachment fallback only", () => {
+  const message = buildCommunicationMessage({
+    provider: "slack",
+    text: "Full help text",
+    presentation: {
+      title: "Calypso help",
+      summary: "Choose a command.",
+      suppressPlainText: true,
+    },
+  });
+
+  assert.equal(message.text, undefined);
+  assert.equal(message.attachments[0].fallback, "Full help text");
+  assert.match(JSON.stringify(message.attachments[0].blocks), /Choose a command/);
+});
+
+test("communication message renderer can keep Teams plain text as card fallback only", () => {
+  const message = buildCommunicationMessage({
+    provider: "microsoft_teams",
+    text: "Full help text",
+    presentation: {
+      title: "Calypso help",
+      summary: "Choose a command.",
+      suppressPlainText: true,
+    },
+  });
+
+  assert.equal(message.text, undefined);
+  assert.equal(message.attachments[0].content.fallbackText, "Full help text");
+  assert.match(JSON.stringify(message.attachments[0].content.body), /Choose a command/);
+});
+
 test("communication message renderer builds a preview-style Slack status card", () => {
   const message = buildCommunicationMessage({
     provider: "slack",

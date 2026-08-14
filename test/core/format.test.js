@@ -165,7 +165,8 @@ test("formatReviewRecapResponse renders prioritized recap sections", () => {
   assert.match(message, /^\*PR Review Recap — last week\*/);
   assert.match(message, /\*✅ Approved, unmerged · 1\*/);
   assert.match(message, /\*👤 Waiting on human approval · 1\*/);
-  assert.match(message, /\*⚠️ Unapproved · 1\*/);
+  assert.match(message, /\*Unapproved · 1\*/);
+  assert.doesNotMatch(message, /⚠️/);
   assert.match(
     message,
     /• <https:\/\/github.com\/croft-eng\/croft\/pull\/71\|#71> — \*Improve metrics\*\n  by octocat · modified 2\/13\/2026/,
@@ -368,7 +369,7 @@ test("buildReviewRecapPresentation creates counted tabs with paginated tab views
     [
       ["✅ Approved, unmerged", "10"],
       ["👤 Waiting on human approval", "1"],
-      ["⚠️ Unapproved", "0"],
+      ["Unapproved", "0"],
       ["🗄️ Backburner", "0"],
     ],
   );
@@ -387,6 +388,8 @@ test("buildReviewRecapPresentation creates counted tabs with paginated tab views
     now: new Date("2026-08-14T12:00:00.000Z"),
   });
   assert.equal(approvedTab.sections[0].items.length, 8);
+  assert.ok(approvedTab.sections[0].items.every((item) => item.icon === undefined));
+  assert.ok(approvedTab.sections[0].items.every((item) => item.showStatusIcon === true));
   assert.deepEqual(
     approvedTab.actions.map(({ label }) => label),
     ["All tabs", "Next"],

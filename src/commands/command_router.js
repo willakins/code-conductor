@@ -1,6 +1,7 @@
 const { parseCalypsoCommand } = require("./parsing/command_parser");
 const { createCalypsoCommandService } = require("./services/command_service");
 const { DEFAULT_BOT_NAME } = require("../config");
+const { resolveBotCommandPrefix } = require("../shared/bot_command");
 const {
   buildCommunicationMessage,
 } = require("../platform/communication/message_renderer");
@@ -78,7 +79,7 @@ function registerCalypsoCommand(app, options = {}) {
         respond: sendResponse,
       });
     } catch (error) {
-      console.error("Failed to process /conductor command.");
+      console.error(`Failed to process ${resolveBotCommandPrefix(botName)} command.`);
       console.error(error.message);
       const errorText = `${botName} hit an error while processing that command.`;
       await respond(buildCommandResponse({
@@ -89,9 +90,15 @@ function registerCalypsoCommand(app, options = {}) {
       }));
     }
   };
-  // Keep the original command as a compatibility alias for existing workspaces.
-  app.command("/calypso", commandHandler);
-  app.command("/conductor", commandHandler);
+  // Keep both historical names as compatibility aliases for existing workspaces.
+  const commandPrefixes = new Set([
+    "/calypso",
+    "/conductor",
+    resolveBotCommandPrefix(botName),
+  ]);
+  for (const commandPrefix of commandPrefixes) {
+    app.command(commandPrefix, commandHandler);
+  }
 
   if (typeof app.action === "function") {
     app.action(/^calypso:/, async ({ ack, action, body, client, respond }) =>

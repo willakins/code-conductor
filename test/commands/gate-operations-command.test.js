@@ -273,7 +273,8 @@ test("Slack action values execute through the same command router", async () => 
     },
   });
 
-  assert.match(payload.text, /\/conductor status/);
+  assert.equal(payload.text, undefined);
+  assert.match(payload.attachments[0].fallback, /\/conductor status/);
   assert.match(readSlackBlocks(payload)[0].text.text, /Code Conductor help/);
 });
 
