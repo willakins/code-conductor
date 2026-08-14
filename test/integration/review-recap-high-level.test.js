@@ -243,10 +243,10 @@ test("high-level review recap flow: webhook tracking + config + scheduled post",
   assert.equal(schedulerCalls.postedMessages.length, 1);
   assert.equal(schedulerCalls.postedMessages[0].channel, "CRECAP");
   assert.match(
-    schedulerCalls.postedMessages[0].text,
+    readResponseText(schedulerCalls.postedMessages[0]),
     /^\*PR Review Recap — last week\*/,
   );
-  assert.match(schedulerCalls.postedMessages[0].text, /modified \d{1,2}\/\d{1,2}\/\d{4}/);
+  assert.match(readResponseText(schedulerCalls.postedMessages[0]), /modified \d{1,2}\/\d{1,2}\/\d{4}/);
   assert.match(
     JSON.stringify(schedulerCalls.postedMessages[0].attachments),
     /PR review recap/,
@@ -274,4 +274,8 @@ async function runSlashCommand(commandHandler, text) {
   });
 
   return response;
+}
+
+function readResponseText(message) {
+  return message.text || message.attachments?.[0]?.fallback || "";
 }

@@ -49,7 +49,7 @@ test("gate close persists an audited reason and announces the transition", async
   const payload = await runCommand(handler, "gate close prod Incident in progress");
 
   assert.equal(payload.response_type, "in_channel");
-  assert.match(payload.text, /gate closed by UADMIN/);
+  assert.match(readResponseText(payload), /gate closed by UADMIN/);
   assert.equal(writes[0].status, "closed");
   assert.equal(writes[0].reason, "Incident in progress");
   assert.ok(readSlackBlocks(payload).some((block) => block.type === "actions"));
@@ -109,7 +109,7 @@ test("gate status reports the actual channel-topic fallback", async () => {
 
   const payload = await runCommand(handler, "gate status prod");
 
-  assert.match(payload.text, /gate is closed from the channel-topic fallback/);
+  assert.match(readResponseText(payload), /gate is closed from the channel-topic fallback/);
   assert.match(JSON.stringify(readSlackBlocks(payload)), /channel-topic fallback is closed/);
 });
 
@@ -125,7 +125,7 @@ test("doctor renders operational checks without leaking secrets", async () => {
 
   const payload = await runCommand(handler, "doctor");
 
-  assert.match(payload.text, /1 Code Conductor diagnostic check/);
+  assert.match(readResponseText(payload), /1 Code Conductor diagnostic check/);
   assert.match(JSON.stringify(readSlackBlocks(payload)), /Target missing/);
 });
 
@@ -175,7 +175,7 @@ test("active deployment blocks a second deploy before provider trigger", async (
 
   const payload = await runCommand(handler, "deploy prod");
 
-  assert.match(payload.text, /run #91 is already active/);
+  assert.match(readResponseText(payload), /run #91 is already active/);
   assert.equal(triggered, false);
 });
 
@@ -212,9 +212,9 @@ test("production deploy bypasses ordinary untested PRs", async () => {
 
   const payload = await runCommand(handler, "deploy prod");
 
-  assert.match(payload.text, /ready for confirmation/);
+  assert.match(readResponseText(payload), /ready for confirmation/);
   assert.match(JSON.stringify(readSlackBlocks(payload)), /deploy prod confirm confirm-token/);
-  assert.doesNotMatch(payload.text, /Deploy blocked due to untested PRs/);
+  assert.doesNotMatch(readResponseText(payload), /Deploy blocked due to untested PRs/);
   assert.deepEqual(deploymentPlanOptions, { includeUntested: true });
 });
 
@@ -248,8 +248,8 @@ test("production deploy rechecks must-test state from the deployment plan", asyn
 
   const payload = await runCommand(handler, "deploy prod");
 
-  assert.match(payload.text, /Force deploy blocked/);
-  assert.match(payload.text, /must-test and cannot be bypassed/);
+  assert.match(readResponseText(payload), /Force deploy blocked/);
+  assert.match(readResponseText(payload), /must-test and cannot be bypassed/);
   assert.equal(confirmationCreated, false);
 });
 
@@ -349,12 +349,12 @@ test("production deploy requires a user-bound server-side confirmation", async (
 
   const preview = await runCommand(handler, "deploy prod");
   assert.equal(triggerCount, 0);
-  assert.match(preview.text, /ready for confirmation/);
+  assert.match(readResponseText(preview), /ready for confirmation/);
   assert.match(JSON.stringify(readSlackBlocks(preview)), /deploy prod confirm confirm-token/);
 
   const confirmed = await runCommand(handler, "deploy prod confirm confirm-token");
   assert.equal(triggerCount, 1);
-  assert.match(confirmed.text, /Deploy to prod is in progress/);
+  assert.match(readResponseText(confirmed), /Deploy to prod is in progress/);
 });
 
 test("post-trigger bookkeeping failures do not release the active deployment run", async () => {
@@ -383,11 +383,15 @@ test("post-trigger bookkeeping failures do not release the active deployment run
 
   const payload = await runCommand(handler, "deploy prod confirm valid-token");
 
-  assert.match(payload.text, /accepted by the provider/);
-  assert.match(payload.text, /post-trigger tracking error/);
+  assert.match(readResponseText(payload), /accepted by the provider/);
+  assert.match(readResponseText(payload), /post-trigger tracking error/);
   assert.equal(completed, false);
 });
 
 function readSlackBlocks(message) {
   return message.attachments[0].blocks;
+}
+
+function readResponseText(message) {
+  return message.text || message.attachments?.[0]?.fallback || "";
 }

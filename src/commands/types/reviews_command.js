@@ -117,7 +117,7 @@ class ReviewsCommand extends BaseCalypsoCommand {
       action: "reviews_list",
       githubUser,
       reviewRecapPage,
-      reviewRecapTabKey,
+      reviewRecapTabKey: argumentsList.length === 0 ? "summary" : reviewRecapTabKey,
       timeframe,
     });
   }

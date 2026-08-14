@@ -111,8 +111,8 @@ test("high-level command lifecycle: status -> confirmed deploy -> status", async
   const deploySuccess = deployResponses[1];
   const statusAfter = await runSlashCommand(commandHandler, "status", "U_TESTER");
 
-  assert.match(statusBefore.text, /No blockers since last prod deploy/);
-  assert.match(statusBefore.text, /1 ordinary untested PR\(s\) will be included by force deploy/);
+  assert.match(readResponseText(statusBefore), /No blockers since last prod deploy/);
+  assert.match(readResponseText(statusBefore), /1 ordinary untested PR\(s\) will be included by force deploy/);
   assert.equal(statusBefore.attachments[0].color, "#2EB67D");
   const statusBeforeBlocks = readSlackBlocks(statusBefore);
   assert.equal(statusBeforeBlocks[0].type, "header");
@@ -128,11 +128,11 @@ test("high-level command lifecycle: status -> confirmed deploy -> status", async
   assert.match(JSON.stringify(statusBeforeBlocks), /Review deployment/);
 
   assert.equal(deployStarted.response_type, "in_channel");
-  assert.match(deployStarted.text, /Deploy to prod is in progress \(id: dep-999\)/);
-  assert.match(deployStarted.text, /Triggered by <@U_TESTER>/);
-  assert.match(deployStarted.text, /PRs to deploy:/);
-  assert.match(deployStarted.text, /Feature PR> by <@U123ABC>\./);
-  assert.doesNotMatch(deployStarted.text, /Marked 1 PR\(s\) deployed/);
+  assert.match(readResponseText(deployStarted), /Deploy to prod is in progress \(id: dep-999\)/);
+  assert.match(readResponseText(deployStarted), /Triggered by <@U_TESTER>/);
+  assert.match(readResponseText(deployStarted), /PRs to deploy:/);
+  assert.match(readResponseText(deployStarted), /Feature PR> by <@U123ABC>\./);
+  assert.doesNotMatch(readResponseText(deployStarted), /Marked 1 PR\(s\) deployed/);
   const deployStartedBlocks = readSlackBlocks(deployStarted);
   assert.match(deployStartedBlocks[0].text.text, /Production deployment started/);
   assert.match(JSON.stringify(deployStartedBlocks), /In progress/);
@@ -151,11 +151,11 @@ test("high-level command lifecycle: status -> confirmed deploy -> status", async
   assert.match(includedChangeRow.fields[0].text, /by <@U123ABC> · croft-eng\/croft#700/);
   assert.match(includedChangeRow.fields[1].text, /Included/);
   assert.equal(deploySuccess.response_type, "in_channel");
-  assert.match(deploySuccess.text, /Deployment dep-999 finished successfully with phase ACTIVE/);
-  assert.match(deploySuccess.text, /Marked 1 PR\(s\) deployed/);
-  assert.match(deploySuccess.text, /Deployed PRs:/);
+  assert.match(readResponseText(deploySuccess), /Deployment dep-999 finished successfully with phase ACTIVE/);
+  assert.match(readResponseText(deploySuccess), /Marked 1 PR\(s\) deployed/);
+  assert.match(readResponseText(deploySuccess), /Deployed PRs:/);
   assert.match(
-    deploySuccess.text,
+    readResponseText(deploySuccess),
     /<https:\/\/github\.com\/croft-eng\/croft\/pull\/700\|Feature PR> by <@U123ABC>\./,
   );
   const deploySuccessBlocks = readSlackBlocks(deploySuccess);
@@ -179,7 +179,7 @@ test("high-level command lifecycle: status -> confirmed deploy -> status", async
   assert.equal(deploySuccessBlocks[deploySuccessBlocks.indexOf(deploymentFooter) - 1].type, "divider");
   assert.match(deploymentFooter.text.text, /Monitoring continues automatically/);
   assert.equal(deploymentFooter.accessory.text.text, "View deployment history");
-  assert.match(statusAfter.text, /No blockers since last prod deploy/);
+  assert.match(readResponseText(statusAfter), /No blockers since last prod deploy/);
   assert.equal(readSlackBlocks(statusAfter)[0].text.text, "✅ Production readiness");
 
   assert.deepEqual(state.transactionStatements, ["BEGIN", "COMMIT"]);
@@ -270,4 +270,8 @@ async function runSlashCommandResponses(commandHandler, text, userId) {
 
 function readSlackBlocks(message) {
   return message.attachments[0].blocks;
+}
+
+function readResponseText(message) {
+  return message.text || message.attachments?.[0]?.fallback || "";
 }
