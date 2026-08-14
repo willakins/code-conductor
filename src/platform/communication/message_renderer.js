@@ -38,18 +38,14 @@ function buildCommunicationMessage({ provider, text, presentation }) {
     return payload;
   }
 
-  const richMessagePayload = normalizedPresentation.suppressPlainText ? {} : payload;
-
   if (normalizeProvider(provider) === "microsoft_teams") {
     return {
-      ...richMessagePayload,
       attachments: [buildTeamsAdaptiveCard(normalizedPresentation, plainText)],
     };
   }
 
   const toneStyle = resolveToneStyle(normalizedPresentation.tone);
   return {
-    ...richMessagePayload,
     attachments: [{
       color: toneStyle.slackColor,
       fallback: plainText || normalizedPresentation.title,
@@ -490,7 +486,6 @@ function normalizePresentation(presentation) {
       ? "after_sections"
       : "before_sections",
     showHeaderIcon: presentation.showHeaderIcon === true,
-    suppressPlainText: presentation.suppressPlainText === true,
     summary: normalizeText(presentation.summary),
     status: normalizePresentationStatus(presentation.status),
     context: normalizeText(presentation.context),

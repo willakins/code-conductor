@@ -110,7 +110,7 @@ test("runReviewRecapSchedulerTick posts and marks slot when due", async () => {
   assert.equal(calls.list.length, 1);
   assert.equal(calls.post.length, 1);
   assert.equal(calls.post[0].channel, "CDEPLOY");
-  assert.equal(calls.post[0].text, "recap message");
+  assert.equal(readResponseText(calls.post[0]), "recap message");
   assert.equal(calls.post[0].mrkdwn, true);
   assert.equal(calls.post[0].attachments.length, 1);
   assert.match(JSON.stringify(calls.post[0].attachments), /PR review recap/);
@@ -468,3 +468,7 @@ test("runReviewRecapSchedulerTick stops retrying after 3 not_in_channel failures
     1,
   );
 });
+
+function readResponseText(message) {
+  return message.text || message.attachments?.[0]?.fallback || "";
+}

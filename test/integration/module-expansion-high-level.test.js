@@ -240,10 +240,10 @@ test("high-level support email flow: enable -> webhook -> notify -> list -> resp
   assert.match(postedMessages[0].text, /On call: <@UONCALL>/);
 
   const listPayload = await runSlashCommand(commandHandler, "emails");
-  assert.match(listPayload.text, /\[1\] alice@example.com \| Billing question/);
+  assert.match(readResponseText(listPayload), /\[1\] alice@example.com \| Billing question/);
 
   const respondPayload = await runSlashCommand(commandHandler, "emails responded 1");
-  assert.match(respondPayload.text, /Marked support email \[1\] as responded/);
+  assert.match(readResponseText(respondPayload), /Marked support email \[1\] as responded/);
   assert.equal(state.supportEmailThreads[0].status, "responded");
 });
 
@@ -440,4 +440,8 @@ function silentLogger() {
     info() {},
     warn() {},
   };
+}
+
+function readResponseText(message) {
+  return message.text || message.attachments?.[0]?.fallback || "";
 }

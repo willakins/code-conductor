@@ -30,14 +30,15 @@ const STATUS_PRESENTATION = {
   context: "Run `/conductor tested 42` when verified.",
 };
 
-test("communication message renderer builds Slack blocks with plain-text fallback", () => {
+test("communication message renderer keeps Slack plain text as attachment fallback", () => {
   const message = buildCommunicationMessage({
     provider: "slack",
     text: "Blocking PRs: acme/widgets#42",
     presentation: STATUS_PRESENTATION,
   });
 
-  assert.equal(message.text, "Blocking PRs: acme/widgets#42");
+  assert.equal(message.text, undefined);
+  assert.equal(message.attachments[0].fallback, "Blocking PRs: acme/widgets#42");
   const blocks = message.attachments[0].blocks;
   assert.match(blocks[0].text.text, /Production deploy is blocked/);
   const renderedMessage = JSON.stringify(blocks);
@@ -47,14 +48,22 @@ test("communication message renderer builds Slack blocks with plain-text fallbac
   );
 });
 
-test("communication message renderer can keep plain text as attachment fallback only", () => {
+test("communication message renderer keeps text visible when no rich presentation exists", () => {
+  const message = buildCommunicationMessage({
+    provider: "slack",
+    text: "Plain command response",
+  });
+
+  assert.deepEqual(message, { text: "Plain command response" });
+});
+
+test("communication message renderer keeps help text as Slack attachment fallback", () => {
   const message = buildCommunicationMessage({
     provider: "slack",
     text: "Full help text",
     presentation: {
       title: "Calypso help",
       summary: "Choose a command.",
-      suppressPlainText: true,
     },
   });
 
@@ -63,14 +72,13 @@ test("communication message renderer can keep plain text as attachment fallback 
   assert.match(JSON.stringify(message.attachments[0].blocks), /Choose a command/);
 });
 
-test("communication message renderer can keep Teams plain text as card fallback only", () => {
+test("communication message renderer keeps help text as Teams card fallback", () => {
   const message = buildCommunicationMessage({
     provider: "microsoft_teams",
     text: "Full help text",
     presentation: {
       title: "Calypso help",
       summary: "Choose a command.",
-      suppressPlainText: true,
     },
   });
 
@@ -174,10 +182,14 @@ test("communication message renderer builds a Teams adaptive card", () => {
     presentation: { ...STATUS_PRESENTATION, factsPosition: "after_sections" },
   });
 
-  assert.equal(message.text, "Blocking PRs: acme/widgets#42");
+  assert.equal(message.text, undefined);
   assert.equal(
     message.attachments[0].contentType,
     "application/vnd.microsoft.card.adaptive",
+  );
+  assert.equal(
+    message.attachments[0].content.fallbackText,
+    "Blocking PRs: acme/widgets#42",
   );
   const body = message.attachments[0].content.body;
   const renderedMessage = JSON.stringify(body);

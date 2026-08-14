@@ -144,8 +144,8 @@ test("registerCalypsoCommand emails command lists pending support emails", async
   });
 
   assert.equal(payload.response_type, "ephemeral");
-  assert.match(payload.text, /Pending customer support emails:/);
-  assert.match(payload.text, /\[42\] alice@example.com \| Billing question/);
+  assert.match(readResponseText(payload), /Pending customer support emails:/);
+  assert.match(readResponseText(payload), /\[42\] alice@example.com \| Billing question/);
   assert.match(readSlackBlocks(payload)[0].text.text, /Support email/);
 });
 
@@ -178,7 +178,7 @@ test("registerCalypsoCommand emails command marks support email responded", asyn
 
   assert.deepEqual(calls, [{ emailId: 7, respondedBy: "U123" }]);
   assert.equal(payload.response_type, "ephemeral");
-  assert.match(payload.text, /Marked support email \[7\] as responded/);
+  assert.match(readResponseText(payload), /Marked support email \[7\] as responded/);
 });
 
 test("registerCalypsoCommand emails draft generates a reply for the current on-call user", async () => {
@@ -228,9 +228,9 @@ test("registerCalypsoCommand emails draft generates a reply for the current on-c
   });
 
   assert.equal(payload.response_type, "ephemeral");
-  assert.match(payload.text, /Draft reply for support email \[7\]/);
-  assert.match(payload.text, /Subject: Re: Billing question/);
-  assert.match(payload.text, /We are reviewing the billing issue now/);
+  assert.match(readResponseText(payload), /Draft reply for support email \[7\]/);
+  assert.match(readResponseText(payload), /Subject: Re: Billing question/);
+  assert.match(readResponseText(payload), /We are reviewing the billing issue now/);
   assert.match(capturedDraftArguments.systemPrompt, /Keep replies brief/);
   assert.match(capturedDraftArguments.userPrompt, /Customer email:/);
   assert.match(capturedDraftArguments.userPrompt, /keep it concise/);
@@ -296,7 +296,7 @@ test("registerCalypsoCommand emails draft fetches and caches missing message tex
   });
 
   assert.equal(payload.response_type, "ephemeral");
-  assert.match(payload.text, /Subject: Re: Need help/);
+  assert.match(readResponseText(payload), /Subject: Re: Need help/);
   assert.deepEqual(calls, [
     { messageId: "msg-9", provider: "outlook" },
     {
@@ -338,7 +338,7 @@ test("registerCalypsoCommand emails draft denies users who are not admin or on-c
   });
 
   assert.equal(payload.response_type, "ephemeral");
-  assert.match(payload.text, /Email draft denied/);
+  assert.match(readResponseText(payload), /Email draft denied/);
 });
 
 test("registerCalypsoCommand emails draft reports AI unavailability", async () => {
@@ -381,8 +381,8 @@ test("registerCalypsoCommand emails draft reports AI unavailability", async () =
   });
 
   assert.equal(payload.response_type, "ephemeral");
-  assert.match(payload.text, /AI drafting unavailable/);
-  assert.match(payload.text, /`anthropic`/);
+  assert.match(readResponseText(payload), /AI drafting unavailable/);
+  assert.match(readResponseText(payload), /`anthropic`/);
 });
 
 test("registerCalypsoCommand emails draft reports support email not found", async () => {
@@ -414,7 +414,7 @@ test("registerCalypsoCommand emails draft reports support email not found", asyn
   });
 
   assert.equal(payload.response_type, "ephemeral");
-  assert.match(payload.text, /Support email \[404\] not found/);
+  assert.match(readResponseText(payload), /Support email \[404\] not found/);
 });
 
 test("registerCalypsoCommand config command updates environment status monitoring", async () => {
@@ -447,7 +447,7 @@ test("registerCalypsoCommand config command updates environment status monitorin
 
   assert.deepEqual(calls, [{ enabled: true, updatedBy: "UADMIN" }]);
   assert.equal(payload.response_type, "in_channel");
-  assert.match(payload.text, /Updated environment status monitoring to `on`/);
+  assert.match(readResponseText(payload), /Updated environment status monitoring to `on`/);
 });
 
 test("registerCalypsoCommand config command updates error tracking project", async () => {
@@ -480,7 +480,7 @@ test("registerCalypsoCommand config command updates error tracking project", asy
 
   assert.deepEqual(calls, [{ projectSlug: "api", updatedBy: "UADMIN" }]);
   assert.equal(payload.response_type, "in_channel");
-  assert.match(payload.text, /Updated error tracking project to `api`/);
+  assert.match(readResponseText(payload), /Updated error tracking project to `api`/);
 });
 
 test("registerCalypsoCommand config command rejects invalid error tracking project ephemerally", async () => {
@@ -512,7 +512,7 @@ test("registerCalypsoCommand config command rejects invalid error tracking proje
 
   assert.equal(setCalled, false);
   assert.equal(payload.response_type, "ephemeral");
-  assert.match(payload.text, /Error tracking project slug `bad\/slug` is invalid/);
+  assert.match(readResponseText(payload), /Error tracking project slug `bad\/slug` is invalid/);
 });
 
 test("registerCalypsoCommand errors command lists unresolved tracked issues", async () => {
@@ -571,9 +571,9 @@ test("registerCalypsoCommand errors command lists unresolved tracked issues", as
   });
 
   assert.equal(payload.response_type, "ephemeral");
-  assert.match(payload.text, /Tracked unresolved errors for project `api` in environment `production`/);
-  assert.match(payload.text, /\[API-7\] Database unavailable/);
-  assert.match(payload.text, /regressions:1/);
+  assert.match(readResponseText(payload), /Tracked unresolved errors for project `api` in environment `production`/);
+  assert.match(readResponseText(payload), /\[API-7\] Database unavailable/);
+  assert.match(readResponseText(payload), /regressions:1/);
   assert.deepEqual(calls, [
     {
       environment: "production",
@@ -612,7 +612,7 @@ test("registerCalypsoCommand config command rejects invalid environment status u
 
   assert.equal(setCalled, false);
   assert.equal(payload.response_type, "ephemeral");
-  assert.match(payload.text, /Environment status URL `ftp:\/\/example.com` is invalid/);
+  assert.match(readResponseText(payload), /Environment status URL `ftp:\/\/example.com` is invalid/);
 });
 
 test("registerCalypsoCommand config command updates support email on call", async () => {
@@ -648,7 +648,7 @@ test("registerCalypsoCommand config command updates support email on call", asyn
   assert.equal(calls[0].updatedBy, "UADMIN");
   assert.ok(calls[0].expiresAt);
   assert.equal(payload.response_type, "in_channel");
-  assert.match(payload.text, /Updated support email on-call to <@U555> for `1d`/);
+  assert.match(readResponseText(payload), /Updated support email on-call to <@U555> for `1d`/);
 });
 
 test("registerCalypsoCommand config command clears support email on call", async () => {
@@ -681,7 +681,7 @@ test("registerCalypsoCommand config command clears support email on call", async
 
   assert.deepEqual(calls, ["UADMIN"]);
   assert.equal(payload.response_type, "in_channel");
-  assert.match(payload.text, /Cleared support email on-call assignment/);
+  assert.match(readResponseText(payload), /Cleared support email on-call assignment/);
 });
 
 test("registerCalypsoCommand config command reports unresolved support email on call handle", async () => {
@@ -719,9 +719,13 @@ test("registerCalypsoCommand config command reports unresolved support email on 
   });
 
   assert.equal(payload.response_type, "ephemeral");
-  assert.match(payload.text, /Could not resolve `@ghost` to a Slack user/);
+  assert.match(readResponseText(payload), /Could not resolve `@ghost` to a Slack user/);
 });
 
 function readSlackBlocks(message) {
   return message.attachments[0].blocks;
+}
+
+function readResponseText(message) {
+  return message.text || message.attachments?.[0]?.fallback || "";
 }

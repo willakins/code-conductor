@@ -39,7 +39,6 @@ class HelpCommand extends BaseCalypsoCommand {
     return this.buildExecutionResult(parsedCommand.responseText, {
       presentation: {
         ...presentation,
-        suppressPlainText: true,
         title: buildHelpPresentationTitle(
           this.botName,
           parsedCommand.helpTopic,
