@@ -391,22 +391,22 @@ function buildSlackRow(item) {
   const title = item.url
     ? `<${sanitizeSlackUrl(item.url)}|${sanitizeSlackLinkLabel(item.title)}>`
     : item.title;
-  const primaryText = [
-    [item.icon, title].filter(Boolean).join(" "),
+  const statusStyle = resolveToneStyle(item.statusTone);
+  const statusIcon = item.showStatusIcon ? `${statusStyle.icon} ` : "";
+  const status = item.status ? `${statusIcon}*${item.status}*` : "";
+  const secondaryText = [
     item.description ? `_${item.description}_` : "",
+    status,
+  ].filter(Boolean).join("  ·  ");
+  const text = [
+    [item.icon, title].filter(Boolean).join(" "),
+    secondaryText,
   ].filter(Boolean).join("\n");
-  const fields = [{ type: "mrkdwn", text: primaryText.slice(0, 2000) }];
 
-  if (item.status) {
-    const statusStyle = resolveToneStyle(item.statusTone);
-    const statusIcon = item.showStatusIcon ? `${statusStyle.icon} ` : "";
-    fields.push({
-      type: "mrkdwn",
-      text: `${statusIcon}*${item.status}*`.slice(0, 2000),
-    });
-  }
-
-  return { type: "section", fields };
+  return {
+    type: "section",
+    text: { type: "mrkdwn", text: text.slice(0, 3000) },
+  };
 }
 
 function formatSlackFact(fact) {

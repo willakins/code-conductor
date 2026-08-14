@@ -111,6 +111,7 @@ test("communication message renderer builds a preview-style Slack status card", 
           icon: "🔀",
           title: "#187 Add billing webhooks",
           url: "https://example.test/pull/187",
+          description: "by octocat · modified 8/14/2026",
           status: "Must test",
           statusTone: "warning",
         }],
@@ -133,10 +134,14 @@ test("communication message renderer builds a preview-style Slack status card", 
   assert.match(blocks[1].text.text, /\*Blocked\*  •  1 required test/);
 
   const changeRow = blocks.find((block) =>
-    block.type === "section" && block.fields?.some((field) => field.text.includes("#187")),
+    block.type === "section" && block.text?.text.includes("#187"),
   );
-  assert.match(changeRow.fields[0].text, /🔀 <https:\/\/example\.test\/pull\/187\|#187 Add billing webhooks>/);
-  assert.match(changeRow.fields[1].text, /⚠️ \*Must test\*/);
+  assert.equal(changeRow.fields, undefined);
+  assert.match(changeRow.text.text, /🔀 <https:\/\/example\.test\/pull\/187\|#187 Add billing webhooks>/);
+  assert.match(
+    changeRow.text.text,
+    /\n_by octocat · modified 8\/14\/2026_  ·  ⚠️ \*Must test\*/,
+  );
   const changeRowIndex = blocks.indexOf(changeRow);
   const factsIndex = blocks.findIndex((block) =>
     block.type === "section" && block.fields?.some((field) => field.text.includes("Production app")),
