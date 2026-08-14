@@ -134,22 +134,24 @@ test("high-level command lifecycle: status -> confirmed deploy -> status", async
   assert.match(readResponseText(deployStarted), /Feature PR> by <@U123ABC>\./);
   assert.doesNotMatch(readResponseText(deployStarted), /Marked 1 PR\(s\) deployed/);
   const deployStartedBlocks = readSlackBlocks(deployStarted);
-  assert.match(deployStartedBlocks[0].text.text, /Production deployment started/);
-  assert.match(JSON.stringify(deployStartedBlocks), /In progress/);
+  assert.equal(deployStartedBlocks[0].text.text, "🚀 Production deployment started");
+  assert.match(deployStartedBlocks[1].text.text, /Production is now deploying/);
+  assert.equal((JSON.stringify(deployStartedBlocks).match(/🚀/g) || []).length, 1);
   const changesIncludedBlock = deployStartedBlocks.find(
     (block) =>
       block.type === "section"
       && block.text?.text.includes("Changes included"),
   );
-  assert.match(changesIncludedBlock.text.text, /Changes included/);
-  const includedChangeRow = deployStartedBlocks.find(
-    (block) =>
-      block.type === "section"
-      && block.fields?.some((field) => field.text.includes("Feature PR")),
+  assert.match(
+    changesIncludedBlock.text.text,
+    /<https:\/\/github\.com\/croft-eng\/croft\/pull\/700\|Feature PR> by <@U123ABC> · croft-eng\/croft#700 · Included/,
   );
-  assert.match(includedChangeRow.fields[0].text, /<https:\/\/github\.com\/croft-eng\/croft\/pull\/700\|Feature PR>/);
-  assert.match(includedChangeRow.fields[0].text, /by <@U123ABC> · croft-eng\/croft#700/);
-  assert.match(includedChangeRow.fields[1].text, /Included/);
+  assert.equal(
+    deployStartedBlocks.filter((block) =>
+      block.type === "section" && block.fields?.some((field) => field.text.includes("Feature PR"))
+    ).length,
+    0,
+  );
   assert.equal(deploySuccess.response_type, "in_channel");
   assert.match(readResponseText(deploySuccess), /Deployment dep-999 finished successfully with phase ACTIVE/);
   assert.match(readResponseText(deploySuccess), /Marked 1 PR\(s\) deployed/);

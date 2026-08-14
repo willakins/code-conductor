@@ -2336,6 +2336,13 @@ test("registerCalypsoCommand triggers deploy and reports planned PRs when clear 
       url: "https://github.com/croft-eng/croft/pull/13",
       author_login: "hubot",
     },
+    ...Array.from({ length: 10 }, (_value, index) => ({
+      repo: "croft-eng/croft",
+      pr_number: index + 14,
+      title: `Change ${index + 3}`,
+      url: `https://github.com/croft-eng/croft/pull/${index + 14}`,
+      author_login: "hubot",
+    })),
   ];
   const app = {
     command(_name, handler) {
@@ -2376,13 +2383,29 @@ test("registerCalypsoCommand triggers deploy and reports planned PRs when clear 
   assert.equal(payload.response_type, "in_channel");
   assert.match(readResponseText(payload), /Deploy to prod is in progress/);
   assert.match(readResponseText(payload), /Triggered by <@U123>/);
-  assert.doesNotMatch(readResponseText(payload), /Marked 2 PR\(s\) deployed/);
+  assert.doesNotMatch(readResponseText(payload), /Marked 12 PR\(s\) deployed/);
   assert.match(readResponseText(payload), /PRs to deploy:/);
   assert.match(readResponseText(payload), /<https:\/\/github\.com\/croft-eng\/croft\/pull\/12\|Add deploy gate> by <@U123ABC>\./);
   assert.match(
     readResponseText(payload),
     /<https:\/\/github\.com\/croft-eng\/croft\/pull\/13\|Fix flaky test> by hubot \(github username since no matching slack username\)\./,
   );
+  const deployStartedBlocks = readSlackBlocks(payload);
+  assert.equal((JSON.stringify(deployStartedBlocks).match(/🚀/g) || []).length, 1);
+  const deploymentIdFact = deployStartedBlocks
+    .find((block) => block.type === "section" && block.fields)
+    .fields.find((field) => field.text.includes("Deployment ID"));
+  assert.match(
+    deploymentIdFact.text,
+    /<https:\/\/cloud\.digitalocean\.com\/apps\/app-id\|dep-123>/,
+  );
+  const changeListBlocks = deployStartedBlocks.filter(
+    (block) => block.type === "section" && block.text?.text.includes("github.com/croft-eng/croft/pull/"),
+  );
+  assert.equal(changeListBlocks.length, 2);
+  assert.match(changeListBlocks[0].text.text, /Changes included/);
+  assert.match(changeListBlocks[1].text.text, /pull\/23\|Change 12/);
+  assert.ok(changeListBlocks.every((block) => block.fields === undefined));
   assert.deepEqual(queryCalls, []);
 });
 
