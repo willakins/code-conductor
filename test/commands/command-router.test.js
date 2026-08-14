@@ -130,6 +130,17 @@ test("handleCalypsoCommand routes reviews input", () => {
   assert.equal(result.githubUser, null);
 });
 
+test("handleCalypsoCommand routes review recap tab actions", () => {
+  const result = handleCalypsoCommand({
+    text: "reviews tab:backburner page:2",
+    user_id: "U123",
+  });
+
+  assert.equal(result.action, "reviews_list");
+  assert.equal(result.reviewRecapTabKey, "backburner");
+  assert.equal(result.reviewRecapPage, 2);
+});
+
 test("handleCalypsoCommand routes reviews input with github user", () => {
   const result = handleCalypsoCommand({ text: "reviews octocat", user_id: "U123" });
 
@@ -880,6 +891,53 @@ test("registerCalypsoCommand shows open waiting reviews without filters", async 
   );
   assert.match(reviewRow.fields[0].text, /#55  Add observability/);
   assert.match(reviewRow.fields[1].text, /Review requested/);
+});
+
+test("registerCalypsoCommand opens a paginated recap tab", async () => {
+  let commandHandler;
+  const app = {
+    command(_name, handler) {
+      commandHandler = handler;
+    },
+  };
+  const approvedPullRequests = Array.from({ length: 9 }, (_value, index) => ({
+    repo: "croft-eng/croft",
+    pr_number: 200 + index,
+    title: `Approved ${index + 1}`,
+    url: `https://github.com/croft-eng/croft/pull/${200 + index}`,
+    author_login: "octocat",
+    review_state: "approved",
+    codex_approved: true,
+    last_modified_at: "2026-08-13T12:00:00.000Z",
+  }));
+
+  registerCalypsoCommand(app, {
+    pool: {},
+    getReviewRecapConfigFn: async () => ({
+      reviewScope: "all",
+      recencyValue: 1,
+      recencyUnit: "w",
+      timeZone: "America/New_York",
+    }),
+    listOpenPullRequestsForReviewRecapSinceFn: async () => approvedPullRequests,
+    readTimeZonePreferenceFn: async () => "America/New_York",
+  });
+
+  let payload;
+  await commandHandler({
+    command: { text: "reviews tab:approved", user_id: "U123" },
+    ack: async () => {},
+    respond: async (message) => {
+      payload = message;
+    },
+  });
+
+  assert.equal(payload.response_type, "ephemeral");
+  const renderedBlocks = JSON.stringify(readSlackBlocks(payload));
+  assert.match(renderedBlocks, /Approved, unmerged/);
+  assert.match(renderedBlocks, /#208  Approved 9/);
+  assert.doesNotMatch(renderedBlocks, /#200  Approved 1/);
+  assert.match(renderedBlocks, /reviews tab:approved page:2/);
 });
 
 test("registerCalypsoCommand filters waiting reviews by github user", async () => {

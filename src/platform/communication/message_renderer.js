@@ -197,35 +197,14 @@ function buildTeamsAdaptiveCard(presentation) {
   }
 
   for (const section of presentation.sections) {
-    const sectionItems = section.items.map(formatTeamsItem);
-    body.push({
-      type: "Container",
-      separator: section.separator,
-      items: [
-        section.title
-          ? {
-              type: "TextBlock",
-              text: section.title,
-              weight: "Bolder",
-              wrap: true,
-            }
-          : null,
-        section.text
-          ? {
-              type: "TextBlock",
-              text: convertSlackMarkupToTeams(section.text),
-              wrap: true,
-              spacing: "Small",
-            }
-          : null,
-        ...sectionItems.map((text) => ({
-          type: "TextBlock",
-          text,
-          wrap: true,
-          spacing: "Small",
-        })),
-      ].filter(Boolean),
-    });
+    body.push(buildTeamsSectionContainer(section));
+  }
+
+  for (const section of presentation.toggleSections) {
+    body.push(buildTeamsSectionContainer(section, {
+      id: section.id,
+      isVisible: false,
+    }));
   }
 
   if (presentation.facts.length > 0 && presentation.factsPosition === "after_sections") {
@@ -236,18 +215,7 @@ function buildTeamsAdaptiveCard(presentation) {
     body.push({
       type: "ActionSet",
       separator: true,
-      actions: presentation.actions.slice(0, 5).map((action) =>
-        action.url
-          ? {
-              type: "Action.OpenUrl",
-              title: action.label,
-              url: action.url,
-            }
-          : {
-              type: "Action.Submit",
-              title: action.label,
-              data: { command: action.command },
-            }),
+      actions: presentation.actions.slice(0, 5).map(buildTeamsAction),
     });
   }
 
@@ -270,6 +238,46 @@ function buildTeamsAdaptiveCard(presentation) {
       version: "1.4",
       body,
     },
+  };
+}
+
+function buildTeamsSectionContainer(section, options = {}) {
+  const sectionItems = section.items.map(formatTeamsItem);
+  return {
+    type: "Container",
+    ...(options.id ? { id: options.id } : {}),
+    ...(typeof options.isVisible === "boolean" ? { isVisible: options.isVisible } : {}),
+    separator: options.id ? true : section.separator,
+    items: [
+      section.title
+        ? {
+            type: "TextBlock",
+            text: section.title,
+            weight: "Bolder",
+            wrap: true,
+          }
+        : null,
+      section.text
+        ? {
+            type: "TextBlock",
+            text: convertSlackMarkupToTeams(section.text),
+            wrap: true,
+            spacing: "Small",
+          }
+        : null,
+      ...sectionItems.map((text) => ({
+        type: "TextBlock",
+        text,
+        wrap: true,
+        spacing: "Small",
+      })),
+      section.actions?.length > 0
+        ? {
+            type: "ActionSet",
+            actions: section.actions.map(buildTeamsAction),
+          }
+        : null,
+    ].filter(Boolean),
   };
 }
 
@@ -328,6 +336,31 @@ function buildSlackButton(action) {
           },
         }
       : {}),
+  };
+}
+
+function buildTeamsAction(action) {
+  if (action.toggleTargets.length > 0) {
+    return {
+      type: "Action.ToggleVisibility",
+      title: action.label,
+      targetElements: action.toggleTargets.map((target) => ({
+        elementId: target.id,
+        isVisible: target.isVisible,
+      })),
+    };
+  }
+  if (action.url) {
+    return {
+      type: "Action.OpenUrl",
+      title: action.label,
+      url: action.url,
+    };
+  }
+  return {
+    type: "Action.Submit",
+    title: action.label,
+    data: { command: action.command },
   };
 }
 
@@ -464,16 +497,7 @@ function normalizePresentation(presentation) {
         value: normalizeText(fact?.value),
       }))
       .filter((fact) => fact.label && fact.value),
-    actions: (Array.isArray(presentation.actions) ? presentation.actions : [])
-      .map((action, index) => ({
-        command: normalizeText(action?.command),
-        confirm: normalizeText(action?.confirm),
-        id: normalizeText(action?.id) || `action_${index}`,
-        label: normalizeText(action?.label),
-        style: normalizeText(action?.style),
-        url: normalizeText(action?.url),
-      }))
-      .filter((action) => action.label && (action.command || action.url)),
+    actions: normalizePresentationActions(presentation.actions),
     sections: (Array.isArray(presentation.sections) ? presentation.sections : [])
       .map((section) => ({
         layout: normalizeText(section?.layout) === "rows" ? "rows" : "list",
@@ -483,7 +507,38 @@ function normalizePresentation(presentation) {
         items: normalizePresentationItems(section?.items),
       }))
       .filter((section) => section.title || section.text || section.items.length > 0),
+    toggleSections: (Array.isArray(presentation.toggleSections)
+      ? presentation.toggleSections
+      : [])
+      .map((section) => ({
+        id: normalizeText(section?.id),
+        title: normalizeText(section?.title),
+        text: normalizeText(section?.text),
+        actions: normalizePresentationActions(section?.actions),
+        items: normalizePresentationItems(section?.items),
+      }))
+      .filter((section) => section.id && (section.title || section.text || section.items.length > 0)),
   };
+}
+
+function normalizePresentationActions(actions) {
+  return (Array.isArray(actions) ? actions : [])
+    .map((action, index) => ({
+      command: normalizeText(action?.command),
+      confirm: normalizeText(action?.confirm),
+      id: normalizeText(action?.id) || `action_${index}`,
+      label: normalizeText(action?.label),
+      style: normalizeText(action?.style),
+      toggleTargets: (Array.isArray(action?.toggleTargets) ? action.toggleTargets : [])
+        .map((target) => ({
+          id: normalizeText(target?.id),
+          isVisible: target?.isVisible === true,
+        }))
+        .filter((target) => target.id),
+      url: normalizeText(action?.url),
+    }))
+    .filter((action) =>
+      action.label && (action.command || action.url || action.toggleTargets.length > 0));
 }
 
 function normalizePresentationStatus(status) {

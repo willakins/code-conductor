@@ -894,13 +894,15 @@ test("upsertOpenPullRequestReviewState upserts expected fields", async () => {
     closedAt: null,
     mergedAt: null,
     lastReviewedAt: null,
+    lastModifiedAt: "2026-02-16T13:30:00.000Z",
   });
 
   assert.match(captured.sql, /INSERT INTO open_pr_review_state/);
   assert.equal(captured.params[0], "croft-eng/croft");
   assert.equal(captured.params[1], 77);
   assert.equal(captured.params[8], "waiting");
-  assert.equal(captured.params[14], null);
+  assert.equal(captured.params[14], "2026-02-16T13:30:00.000Z");
+  assert.equal(captured.params[15], null);
   assert.deepEqual(result, { repo: "croft-eng/croft", pr_number: 77, review_state: "waiting" });
 });
 
@@ -1054,7 +1056,7 @@ test("listOpenPullRequestsWaitingOnReviewSince returns rows in recency window", 
   assert.match(captured.sql, /FROM open_pr_review_state/);
   assert.match(captured.sql, /lifecycle_state = 'open'/);
   assert.match(captured.sql, /review_state IN \('waiting', 'changes_requested'\)/);
-  assert.match(captured.sql, /COALESCE\(last_reviewed_at, opened_for_review_at, opened_at\) AS last_modified_at/);
+  assert.match(captured.sql, /COALESCE\(last_modified_at, last_reviewed_at, opened_for_review_at, opened_at\) AS last_modified_at/);
   assert.doesNotMatch(captured.sql, /updated_at, opened_for_review_at, opened_at\) AS last_modified_at/);
   assert.deepEqual(captured.params, [sinceTimestamp]);
   assert.equal(result.length, 1);
@@ -1064,6 +1066,7 @@ test("listOpenPullRequestsWaitingOnReviewSince returns rows in recency window", 
 test("listOpenPullRequestsForReviewRecapSince returns open non-draft rows", async () => {
   const captured = {};
   const sinceTimestamp = new Date("2026-02-09T14:00:00.000Z");
+  const backburnerBeforeTimestamp = new Date("2026-01-18T14:00:00.000Z");
   const pool = {
     async query(sql, params) {
       captured.sql = sql;
@@ -1074,15 +1077,20 @@ test("listOpenPullRequestsForReviewRecapSince returns open non-draft rows", asyn
     },
   };
 
-  const result = await listOpenPullRequestsForReviewRecapSince(pool, sinceTimestamp);
+  const result = await listOpenPullRequestsForReviewRecapSince(
+    pool,
+    sinceTimestamp,
+    backburnerBeforeTimestamp,
+  );
 
   assert.match(captured.sql, /FROM open_pr_review_state/);
   assert.match(captured.sql, /lifecycle_state = 'open'/);
   assert.match(captured.sql, /is_draft = false/);
-  assert.match(captured.sql, /COALESCE\(last_reviewed_at, opened_for_review_at, opened_at\) AS last_modified_at/);
+  assert.match(captured.sql, /COALESCE\(last_modified_at, last_reviewed_at, opened_for_review_at, opened_at\) AS last_modified_at/);
   assert.doesNotMatch(captured.sql, /updated_at, opened_for_review_at, opened_at\) AS last_modified_at/);
   assert.match(captured.sql, /COALESCE\(opened_for_review_at, opened_at\) >= \$1/);
-  assert.deepEqual(captured.params, [sinceTimestamp]);
+  assert.match(captured.sql, /last_modified_at[\s\S]+< \$2/);
+  assert.deepEqual(captured.params, [sinceTimestamp, backburnerBeforeTimestamp]);
   assert.equal(result.length, 1);
   assert.equal(result[0].pr_number, 71);
 });

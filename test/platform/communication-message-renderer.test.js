@@ -217,3 +217,56 @@ test("communication message renderer maps actions to Slack and Teams", () => {
   );
   assert.deepEqual(actionSet.actions[0].data, { command: "deploy prod" });
 });
+
+test("communication message renderer maps provider-safe toggle tabs", () => {
+  const presentation = {
+    title: "PR review recap",
+    actions: [{
+      id: "approved_tab",
+      label: "Approved (2)",
+      command: "reviews tab:approved",
+      toggleTargets: [
+        { id: "approved-page-1", isVisible: true },
+        { id: "backburner-page-1", isVisible: false },
+      ],
+    }],
+    toggleSections: [{
+      id: "approved-page-1",
+      title: "Approved, unmerged",
+      items: [{ title: "#42 Ship it" }],
+      actions: [{
+        id: "all_tabs",
+        label: "All tabs",
+        command: "reviews tab:summary",
+        toggleTargets: [{ id: "approved-page-1", isVisible: false }],
+      }],
+    }],
+  };
+
+  const slackMessage = buildCommunicationMessage({
+    provider: "slack",
+    presentation,
+    text: "recap",
+  });
+  assert.doesNotMatch(JSON.stringify(slackMessage.attachments[0].blocks), /#42 Ship it/);
+  const slackAction = slackMessage.attachments[0].blocks.find(
+    (block) => block.type === "actions",
+  ).elements[0];
+  assert.equal(slackAction.value, "reviews tab:approved");
+
+  const teamsMessage = buildCommunicationMessage({
+    provider: "microsoft_teams",
+    presentation,
+    text: "recap",
+  });
+  const teamsBody = teamsMessage.attachments[0].content.body;
+  const hiddenTab = teamsBody.find((block) => block.id === "approved-page-1");
+  assert.equal(hiddenTab.isVisible, false);
+  assert.match(JSON.stringify(hiddenTab), /#42 Ship it/);
+  const teamsTabAction = teamsBody.find((block) => block.type === "ActionSet").actions[0];
+  assert.equal(teamsTabAction.type, "Action.ToggleVisibility");
+  assert.deepEqual(teamsTabAction.targetElements[0], {
+    elementId: "approved-page-1",
+    isVisible: true,
+  });
+});

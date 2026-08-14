@@ -848,11 +848,12 @@ async function upsertOpenPullRequestReviewState(pool, pullRequestState) {
       closed_at,
       merged_at,
       last_reviewed_at,
+      last_modified_at,
       codex_approved,
       updated_at
     )
     VALUES (
-      $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, COALESCE($15, false), NOW()
+      $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, COALESCE($16, false), NOW()
     )
     ON CONFLICT (repo, pr_number)
     DO UPDATE SET
@@ -868,8 +869,12 @@ async function upsertOpenPullRequestReviewState(pool, pullRequestState) {
       closed_at = EXCLUDED.closed_at,
       merged_at = EXCLUDED.merged_at,
       last_reviewed_at = COALESCE(EXCLUDED.last_reviewed_at, open_pr_review_state.last_reviewed_at),
+      last_modified_at = GREATEST(
+        EXCLUDED.last_modified_at,
+        open_pr_review_state.last_modified_at
+      ),
       codex_approved = CASE
-        WHEN $15 IS NULL THEN open_pr_review_state.codex_approved
+        WHEN $16 IS NULL THEN open_pr_review_state.codex_approved
         ELSE EXCLUDED.codex_approved
       END,
       updated_at = NOW()
@@ -898,6 +903,7 @@ async function upsertOpenPullRequestReviewState(pool, pullRequestState) {
     pullRequestState.closedAt || null,
     pullRequestState.mergedAt || null,
     pullRequestState.lastReviewedAt || null,
+    pullRequestState.lastModifiedAt || pullRequestState.openedAt,
     pullRequestState.codexApproved ?? null,
   ];
   const result = await pool.query(query, queryValues);
@@ -917,6 +923,7 @@ async function updatePullRequestReviewSubmission(pool, reviewStateUpdate) {
     UPDATE open_pr_review_state
     SET review_state = COALESCE($3, review_state),
         last_reviewed_at = $4,
+        last_modified_at = GREATEST(COALESCE($4, last_modified_at), last_modified_at),
         updated_at = NOW()
     WHERE repo = $1
       AND pr_number = $2
@@ -963,7 +970,7 @@ async function listOpenPullRequestsWaitingOnReviewSince(pool, sinceTimestamp) {
       review_state,
       codex_approved,
       opened_for_review_at,
-      COALESCE(last_reviewed_at, opened_for_review_at, opened_at) AS last_modified_at
+      COALESCE(last_modified_at, last_reviewed_at, opened_for_review_at, opened_at) AS last_modified_at
     FROM open_pr_review_state
     WHERE lifecycle_state = 'open'
       AND is_draft = false
@@ -976,7 +983,11 @@ async function listOpenPullRequestsWaitingOnReviewSince(pool, sinceTimestamp) {
   return result.rows;
 }
 
-async function listOpenPullRequestsForReviewRecapSince(pool, sinceTimestamp) {
+async function listOpenPullRequestsForReviewRecapSince(
+  pool,
+  sinceTimestamp,
+  backburnerBeforeTimestamp = new Date(0),
+) {
   const query = `
     SELECT
       repo,
@@ -989,14 +1000,17 @@ async function listOpenPullRequestsForReviewRecapSince(pool, sinceTimestamp) {
       codex_approved,
       opened_at,
       opened_for_review_at,
-      COALESCE(last_reviewed_at, opened_for_review_at, opened_at) AS last_modified_at
+      COALESCE(last_modified_at, last_reviewed_at, opened_for_review_at, opened_at) AS last_modified_at
     FROM open_pr_review_state
     WHERE lifecycle_state = 'open'
       AND is_draft = false
-      AND COALESCE(opened_for_review_at, opened_at) >= $1
+      AND (
+        COALESCE(opened_for_review_at, opened_at) >= $1
+        OR COALESCE(last_modified_at, last_reviewed_at, opened_for_review_at, opened_at) < $2
+      )
     ORDER BY COALESCE(opened_for_review_at, opened_at) ASC, pr_number ASC
   `;
-  const result = await pool.query(query, [sinceTimestamp]);
+  const result = await pool.query(query, [sinceTimestamp, backburnerBeforeTimestamp]);
   return result.rows;
 }
 

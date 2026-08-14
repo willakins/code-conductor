@@ -4,14 +4,22 @@ const {
   listOpenPullRequestsWaitingOnReviewSince,
   markReviewRecapSent,
 } = require("../db");
-const { formatReviewRecapResponse } = require("../util/format");
+const {
+  buildReviewRecapPresentation,
+  formatReviewRecapResponse,
+} = require("../util/format");
+const {
+  createSlackMessageClientAdapter,
+} = require("../platform/communication/slack_message_client_adapter");
+const {
+  REVIEW_RECAP_BACKBURNER_AGE_MS,
+  computeReviewRecapSinceTimestamp,
+} = require("../shared/review_recap");
 
 const DEFAULT_TICK_INTERVAL_MS = 60_000;
 const SCHEDULE_LOOKBACK_MINUTES = 8 * 24 * 60;
 const MAX_POST_ATTEMPTS_PER_SLOT = 3;
 const DAILY_SCHEDULE_WEEKDAY = "daily";
-const REVIEW_RECAP_SCOPE_DEFAULT = "all";
-const REVIEW_RECAP_SCOPE_LEGACY = "legacy";
 const WEEKEND_WEEKDAYS = new Set(["sat", "sun"]);
 const US_FEDERAL_HOLIDAY_OBSERVED_DATE_KEYS_BY_YEAR = new Map();
 
@@ -22,6 +30,7 @@ function startReviewRecapScheduler(options) {
     listOpenPullRequestsForReviewRecapSinceFn = listOpenPullRequestsForReviewRecapSince,
     listOpenPullRequestsWaitingOnReviewSinceFn = null,
     markReviewRecapSentFn = markReviewRecapSent,
+    buildReviewRecapPresentationFn = buildReviewRecapPresentation,
     formatReviewRecapResponseFn = formatReviewRecapResponse,
     tickIntervalMs = DEFAULT_TICK_INTERVAL_MS,
     nowFn = () => new Date(),
@@ -46,6 +55,7 @@ function startReviewRecapScheduler(options) {
       listOpenPullRequestsForReviewRecapSinceFn,
       listOpenPullRequestsWaitingOnReviewSinceFn,
       markReviewRecapSentFn,
+      buildReviewRecapPresentationFn,
       formatReviewRecapResponseFn,
       nowFn,
       logger,
@@ -72,6 +82,7 @@ async function runReviewRecapSchedulerTick({
   listOpenPullRequestsForReviewRecapSinceFn,
   listOpenPullRequestsWaitingOnReviewSinceFn,
   markReviewRecapSentFn,
+  buildReviewRecapPresentationFn = buildReviewRecapPresentation,
   formatReviewRecapResponseFn,
   nowFn,
   logger,
@@ -129,7 +140,7 @@ async function runReviewRecapSchedulerTick({
       return;
     }
 
-    const sinceTimestamp = computeSinceTimestamp({
+    const sinceTimestamp = computeReviewRecapSinceTimestamp({
       now,
       reviewScope: config.reviewScope,
       recencyValue: config.recencyValue,
@@ -139,18 +150,29 @@ async function runReviewRecapSchedulerTick({
       listOpenPullRequestsForReviewRecapSinceFn,
       listOpenPullRequestsWaitingOnReviewSinceFn,
     });
-    const pullRequests = await listPullRequestsFn(pool, sinceTimestamp);
-    const message = formatReviewRecapResponseFn({
+    const backburnerBeforeTimestamp = new Date(
+      now.getTime() - REVIEW_RECAP_BACKBURNER_AGE_MS,
+    );
+    const pullRequests = await listPullRequestsFn(
+      pool,
+      sinceTimestamp,
+      backburnerBeforeTimestamp,
+    );
+    const recapFormatOptions = {
       pullRequests,
       reviewScope: config.reviewScope,
       recencyValue: config.recencyValue,
       recencyUnit: config.recencyUnit,
       timeZone: config.timeZone,
-    });
+      now,
+    };
+    const message = formatReviewRecapResponseFn(recapFormatOptions);
+    const presentation = buildReviewRecapPresentationFn(recapFormatOptions);
 
     try {
       await effectiveMessageClient.postChannelMessage({
         channelId: config.targetChannelId,
+        presentation,
         text: message,
         mrkdwn: true,
       });
@@ -178,22 +200,6 @@ async function runReviewRecapSchedulerTick({
     logger.error("Review recap scheduler tick failed.");
     logger.error(error.message);
   }
-}
-
-function createSlackMessageClientAdapter(slackClient) {
-  if (!slackClient || !slackClient.chat || typeof slackClient.chat.postMessage !== "function") {
-    return null;
-  }
-
-  return {
-    async postChannelMessage({ channelId, mrkdwn, text }) {
-      await slackClient.chat.postMessage({
-        channel: channelId,
-        mrkdwn,
-        text,
-      });
-    },
-  };
 }
 
 function logNoChannelConfigured({ logger, now, schedulerState }) {
@@ -323,51 +329,6 @@ function resolveRecapListFn({
     listOpenPullRequestsWaitingOnReviewSinceFn ||
     listOpenPullRequestsWaitingOnReviewSince
   );
-}
-
-function computeSinceTimestamp({ now, reviewScope, recencyValue, recencyUnit }) {
-  const nowTimestamp = now instanceof Date ? now : new Date(now);
-  const normalizedReviewScope = normalizeReviewRecapScope(reviewScope);
-  if (normalizedReviewScope === REVIEW_RECAP_SCOPE_DEFAULT) {
-    return new Date(0);
-  }
-
-  if (normalizedReviewScope === "day") {
-    return new Date(nowTimestamp.getTime() - 24 * 60 * 60 * 1000);
-  }
-
-  if (normalizedReviewScope === "week") {
-    return new Date(nowTimestamp.getTime() - 7 * 24 * 60 * 60 * 1000);
-  }
-
-  if (normalizedReviewScope === "month") {
-    return new Date(nowTimestamp.getTime() - 30 * 24 * 60 * 60 * 1000);
-  }
-
-  if (normalizedReviewScope !== REVIEW_RECAP_SCOPE_LEGACY) {
-    return new Date(0);
-  }
-
-  const parsedRecencyValue = Number(recencyValue);
-  const normalizedRecencyValue = Number.isInteger(parsedRecencyValue) && parsedRecencyValue > 0
-    ? parsedRecencyValue
-    : 1;
-  const normalizedRecencyUnit = String(recencyUnit || "").toLowerCase().trim();
-
-  const durationDays = normalizedRecencyUnit === "d"
-    ? normalizedRecencyValue
-    : normalizedRecencyValue * 7;
-
-  return new Date(nowTimestamp.getTime() - durationDays * 24 * 60 * 60 * 1000);
-}
-
-function normalizeReviewRecapScope(reviewScope) {
-  const normalizedScope = String(reviewScope || "").toLowerCase().trim();
-  if (["all", "day", "week", "month", "legacy"].includes(normalizedScope)) {
-    return normalizedScope;
-  }
-
-  return REVIEW_RECAP_SCOPE_DEFAULT;
 }
 
 function findMostRecentScheduledSlot({ now, scheduleWeekday, scheduleTime, timeZone, lookbackMinutes }) {

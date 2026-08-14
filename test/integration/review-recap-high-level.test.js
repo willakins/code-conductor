@@ -246,7 +246,11 @@ test("high-level review recap flow: webhook tracking + config + scheduled post",
     schedulerCalls.postedMessages[0].text,
     /^\*PR Review Recap — last week\*/,
   );
-  assert.match(schedulerCalls.postedMessages[0].text, /Last modified: \d{1,2}\/\d{1,2}\/\d{4}/);
+  assert.match(schedulerCalls.postedMessages[0].text, /modified \d{1,2}\/\d{1,2}\/\d{4}/);
+  assert.match(
+    JSON.stringify(schedulerCalls.postedMessages[0].attachments),
+    /PR review recap/,
+  );
   assert.deepEqual(schedulerCalls.markSlots, ["2026-02-17T18:15:00.000Z"]);
   assert.equal(schedulerCalls.sinceTimestamps.length, 1);
 

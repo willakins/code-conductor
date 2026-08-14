@@ -1,14 +1,26 @@
 const { BaseCalypsoCommand } = require("./base_command");
 const { isValidTimeframe, timeframeSince } = require("../../shared/timeframes");
 const {
+  buildReviewRecapPresentation,
   formatReviewListHeader,
   formatReviewPullRequestLine,
+  formatReviewRecapResponse,
   sortPullRequestsByMostRecent,
 } = require("../../util/format");
+const {
+  REVIEW_RECAP_BACKBURNER_AGE_MS,
+  REVIEW_RECAP_CATEGORY_KEYS,
+  computeReviewRecapSinceTimestamp,
+  readReviewPullRequestLastModifiedTimestamp,
+} = require("../../shared/review_recap");
 
 const DAY_IN_MILLISECONDS = 24 * 60 * 60 * 1000;
 const LAST_MONTH_WINDOW_MILLISECONDS = 30 * DAY_IN_MILLISECONDS;
 const LAST_THREE_MONTHS_WINDOW_MILLISECONDS = 90 * DAY_IN_MILLISECONDS;
+const REVIEW_RECAP_TAB_KEYS = new Set([
+  "summary",
+  ...Object.values(REVIEW_RECAP_CATEGORY_KEYS),
+]);
 const LAST_MODIFIED_SECTION_DEFINITIONS = Object.freeze([
   {
     key: "last_month",
@@ -38,6 +50,9 @@ class ReviewsCommand extends BaseCalypsoCommand {
     let sawRecentKeyword = false;
     let timeframe = null;
     let githubUser = null;
+    let reviewRecapTabKey = null;
+    let reviewRecapPage = 1;
+    let sawReviewRecapPage = false;
 
     for (const argument of argumentsList) {
       const normalizedArgument = String(argument || "").trim();
@@ -45,6 +60,25 @@ class ReviewsCommand extends BaseCalypsoCommand {
 
       if (lowerCasedArgument === "recent") {
         sawRecentKeyword = true;
+        continue;
+      }
+
+      if (lowerCasedArgument.startsWith("tab:")) {
+        const requestedTabKey = lowerCasedArgument.slice("tab:".length);
+        if (reviewRecapTabKey || !REVIEW_RECAP_TAB_KEYS.has(requestedTabKey)) {
+          return this.buildRespondParsedCommand(buildUsageMessage());
+        }
+        reviewRecapTabKey = requestedTabKey;
+        continue;
+      }
+
+      if (lowerCasedArgument.startsWith("page:")) {
+        const requestedPage = Number(lowerCasedArgument.slice("page:".length));
+        if (sawReviewRecapPage || !Number.isInteger(requestedPage) || requestedPage <= 0) {
+          return this.buildRespondParsedCommand(buildUsageMessage());
+        }
+        reviewRecapPage = requestedPage;
+        sawReviewRecapPage = true;
         continue;
       }
 
@@ -66,10 +100,18 @@ class ReviewsCommand extends BaseCalypsoCommand {
     if (sawRecentKeyword && !timeframe) {
       return this.buildRespondParsedCommand(buildUsageMessage());
     }
+    if (
+      (sawReviewRecapPage && !reviewRecapTabKey)
+      || (reviewRecapTabKey && (githubUser || timeframe || sawRecentKeyword))
+    ) {
+      return this.buildRespondParsedCommand(buildUsageMessage());
+    }
 
     return this.buildParsedCommand({
       action: "reviews_list",
       githubUser,
+      reviewRecapPage,
+      reviewRecapTabKey,
       timeframe,
     });
   }
@@ -77,6 +119,10 @@ class ReviewsCommand extends BaseCalypsoCommand {
   async execute({ parsedCommand, runtime }) {
     if (!runtime.pool) {
       return this.buildExecutionResult("Reviews command unavailable: database pool is not configured.");
+    }
+
+    if (parsedCommand.reviewRecapTabKey) {
+      return executeReviewRecapTab({ parsedCommand, runtime });
     }
 
     const sinceTimestamp = parsedCommand.timeframe
@@ -158,6 +204,41 @@ class ReviewsCommand extends BaseCalypsoCommand {
   }
 }
 
+async function executeReviewRecapTab({ parsedCommand, runtime }) {
+  const now = new Date();
+  const recapConfig = await runtime.getReviewRecapConfigFn(runtime.pool);
+  const sinceTimestamp = computeReviewRecapSinceTimestamp({
+    now,
+    reviewScope: recapConfig.reviewScope,
+    recencyValue: recapConfig.recencyValue,
+    recencyUnit: recapConfig.recencyUnit,
+  });
+  const pullRequests = await runtime.listOpenPullRequestsForReviewRecapSinceFn(
+    runtime.pool,
+    sinceTimestamp,
+    new Date(now.getTime() - REVIEW_RECAP_BACKBURNER_AGE_MS),
+  );
+  const timeZone = recapConfig.timeZone || await runtime.readTimeZonePreferenceFn(runtime);
+  const selectedTabKey = parsedCommand.reviewRecapTabKey === "summary"
+    ? null
+    : parsedCommand.reviewRecapTabKey;
+  const recapOptions = {
+    now,
+    page: parsedCommand.reviewRecapPage,
+    pullRequests,
+    recencyUnit: recapConfig.recencyUnit,
+    recencyValue: recapConfig.recencyValue,
+    reviewScope: recapConfig.reviewScope,
+    selectedTabKey,
+    timeZone,
+  };
+
+  return {
+    responseText: formatReviewRecapResponse(recapOptions),
+    presentation: buildReviewRecapPresentation(recapOptions),
+  };
+}
+
 function formatReviewStatus(reviewState) {
   return reviewState === "changes_requested" ? "Changes requested" : "Review requested";
 }
@@ -217,7 +298,7 @@ function buildLastModifiedSections(sortedPullRequests) {
 }
 
 function mapPullRequestToLastModifiedSectionKey(pullRequest, nowTimestamp) {
-  const lastModifiedTimestamp = readPullRequestLastModifiedTimestamp(pullRequest);
+  const lastModifiedTimestamp = readReviewPullRequestLastModifiedTimestamp(pullRequest);
   if (!Number.isFinite(lastModifiedTimestamp)) {
     return "three_plus_months";
   }
@@ -231,21 +312,6 @@ function mapPullRequestToLastModifiedSectionKey(pullRequest, nowTimestamp) {
   }
 
   return "three_plus_months";
-}
-
-function readPullRequestLastModifiedTimestamp(pullRequest) {
-  const lastModifiedAt = pullRequest?.last_modified_at
-    || pullRequest?.last_reviewed_at
-    || pullRequest?.opened_for_review_at
-    || pullRequest?.opened_at
-    || null;
-  if (!lastModifiedAt) {
-    return Number.NEGATIVE_INFINITY;
-  }
-
-  const parsedDate = lastModifiedAt instanceof Date ? lastModifiedAt : new Date(lastModifiedAt);
-  const timestamp = parsedDate.getTime();
-  return Number.isFinite(timestamp) ? timestamp : Number.NEGATIVE_INFINITY;
 }
 
 module.exports = {

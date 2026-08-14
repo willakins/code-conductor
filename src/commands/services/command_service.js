@@ -26,6 +26,7 @@ const {
   listGithubSlackUserMappings,
   listPendingSupportEmailThreads,
   listOpenErrorTrackingIssues,
+  listOpenPullRequestsForReviewRecapSince,
   listOpenPullRequestsWaitingOnReviewSince,
   listRecentlyTestedPullRequests,
   listBlockingPullRequests,
@@ -234,6 +235,7 @@ function createDefaultDependencies() {
         )
         : [],
     listOpenErrorTrackingIssuesFn: listOpenErrorTrackingIssues,
+    listOpenPullRequestsForReviewRecapSinceFn: listOpenPullRequestsForReviewRecapSince,
     listOpenPullRequestsWaitingOnReviewSinceFn: listOpenPullRequestsWaitingOnReviewSince,
     listGithubSlackUserMappingsFn: listGithubSlackUserMappings,
     markReviewRecapSentFn: markReviewRecapSent,
@@ -390,6 +392,9 @@ function buildRuntimeContext({ serviceOptions, commandContext, defaultDependenci
     listOpenErrorTrackingIssuesFn:
       mergedOptions.listOpenErrorTrackingIssuesFn ||
       defaultDependencies.listOpenErrorTrackingIssuesFn,
+    listOpenPullRequestsForReviewRecapSinceFn:
+      mergedOptions.listOpenPullRequestsForReviewRecapSinceFn ||
+      defaultDependencies.listOpenPullRequestsForReviewRecapSinceFn,
     listRecentlyTestedPullRequestsFn:
       mergedOptions.listRecentlyTestedPullRequestsFn ||
       defaultDependencies.listRecentlyTestedPullRequestsFn,

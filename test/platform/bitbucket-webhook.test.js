@@ -200,6 +200,7 @@ test("bitbucket webhook tracks created pull request review lifecycle", async () 
   assert.equal(savedReviewState.prNumber, 77);
   assert.equal(savedReviewState.reviewState, "waiting");
   assert.equal(savedReviewState.lifecycleState, "open");
+  assert.equal(savedReviewState.lastModifiedAt, "2026-02-13T17:00:00Z");
   assert.equal(res.body.review_tracking_updated, true);
 });
 

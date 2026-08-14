@@ -280,6 +280,7 @@ function mapPullRequestLifecyclePayload(payload) {
     authorLogin: pullRequest.user?.login || "unknown",
     baseBranch: pullRequest.base?.ref || "",
     openedAt: pullRequest.created_at,
+    lastModifiedAt: pullRequest.updated_at || pullRequest.created_at,
     lastReviewedAt: null,
   };
 

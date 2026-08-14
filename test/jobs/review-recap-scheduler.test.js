@@ -83,8 +83,9 @@ test("runReviewRecapSchedulerTick posts and marks slot when due", async () => {
       calls.mark.push(slotTimestamp);
       return { id: 1, last_sent_slot_at: slotTimestamp };
     },
-    formatReviewRecapResponseFn: ({ pullRequests }) => {
+    formatReviewRecapResponseFn: ({ pullRequests, now: formatterNow }) => {
       assert.equal(pullRequests.length, 1);
+      assert.equal(formatterNow, now);
       return "recap message";
     },
     nowFn: () => now,
@@ -108,16 +109,20 @@ test("runReviewRecapSchedulerTick posts and marks slot when due", async () => {
 
   assert.equal(calls.list.length, 1);
   assert.equal(calls.post.length, 1);
-  assert.deepEqual(calls.post[0], {
-    channel: "CDEPLOY",
-    text: "recap message",
-    mrkdwn: true,
-  });
+  assert.equal(calls.post[0].channel, "CDEPLOY");
+  assert.equal(calls.post[0].text, "recap message");
+  assert.equal(calls.post[0].mrkdwn, true);
+  assert.equal(calls.post[0].attachments.length, 1);
+  assert.match(JSON.stringify(calls.post[0].attachments), /PR review recap/);
+  assert.match(JSON.stringify(calls.post[0].attachments), /Unapproved/);
+  assert.doesNotMatch(JSON.stringify(calls.post[0].attachments), /#71/);
+  assert.match(JSON.stringify(calls.post[0].attachments), /reviews tab:unapproved/);
   assert.deepEqual(calls.mark, ["2026-02-16T14:00:00.000Z"]);
 });
 
 test("runReviewRecapSchedulerTick uses epoch lookback for all-scope recap", async () => {
   let capturedSinceTimestamp = null;
+  let capturedBackburnerBeforeTimestamp = null;
 
   await runReviewRecapSchedulerTick({
     getReviewRecapConfigFn: async () => ({
@@ -132,8 +137,13 @@ test("runReviewRecapSchedulerTick uses epoch lookback for all-scope recap", asyn
       timeZone: "America/New_York",
       lastSentSlotAt: null,
     }),
-    listOpenPullRequestsForReviewRecapSinceFn: async (_pool, sinceTimestamp) => {
+    listOpenPullRequestsForReviewRecapSinceFn: async (
+      _pool,
+      sinceTimestamp,
+      backburnerBeforeTimestamp,
+    ) => {
       capturedSinceTimestamp = sinceTimestamp;
+      capturedBackburnerBeforeTimestamp = backburnerBeforeTimestamp;
       return [];
     },
     markReviewRecapSentFn: async () => ({ id: 1 }),
@@ -155,6 +165,10 @@ test("runReviewRecapSchedulerTick uses epoch lookback for all-scope recap", asyn
 
   assert.ok(capturedSinceTimestamp instanceof Date);
   assert.equal(capturedSinceTimestamp.getTime(), 0);
+  assert.equal(
+    capturedBackburnerBeforeTimestamp.toISOString(),
+    "2026-01-17T14:05:00.000Z",
+  );
 });
 
 test("runReviewRecapSchedulerTick skips when slot already sent", async () => {

@@ -37,6 +37,7 @@ test("runOpenPullRequestSyncTick upserts open PRs and closes stale rows", async 
             base: { ref: "main" },
             draft: false,
             created_at: "2026-02-10T14:00:00.000Z",
+            updated_at: "2026-02-15T14:00:00.000Z",
           },
           {
             number: 72,
@@ -89,6 +90,7 @@ test("runOpenPullRequestSyncTick upserts open PRs and closes stale rows", async 
   assert.equal(calls.upserted.length, 2);
   assert.equal(calls.upserted[0].reviewState, "approved");
   assert.equal(calls.upserted[0].codexApproved, true);
+  assert.equal(calls.upserted[0].lastModifiedAt, "2026-02-15T14:00:00.000Z");
   assert.equal(calls.upserted[1].reviewState, "waiting");
   assert.equal(calls.upserted[1].codexApproved, false);
   assert.equal(calls.upserted[1].openedForReviewAt, null);
