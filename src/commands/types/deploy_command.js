@@ -274,6 +274,7 @@ class DeployCommand extends BaseCalypsoCommand {
             shouldNotifyDeploymentCompletion,
             deployConfigOverrides: this.buildDeployConfigOverridesForCompletion(deployConfiguration),
             presentation: buildDeploymentStartedPresentation({
+              deployAppId: deployConfiguration.deployProductionAppId,
               deployEnvironment,
               deployProvider,
               deploymentId,
@@ -306,6 +307,7 @@ class DeployCommand extends BaseCalypsoCommand {
             productionDeploymentPlan,
           }),
           presentation: buildDeploymentStartedPresentation({
+            deployAppId: deployConfiguration.deployProductionAppId,
             deployEnvironment,
             deployProvider,
             deploymentId,
@@ -718,6 +720,7 @@ function buildBlockedDeploymentPresentation(blockingPullRequests, gateDecision) 
 }
 
 function buildDeploymentStartedPresentation({
+  deployAppId,
   deployEnvironment,
   deployProvider,
   deploymentId,
@@ -733,11 +736,9 @@ function buildDeploymentStartedPresentation({
 
   if (deployEnvironment === "prod") {
     sections.push({
-      layout: "rows",
       title: "Changes included",
       text: pullRequests.length === 0 ? "No tested PRs are queued for this deployment." : "",
       items: pullRequests.map((pullRequest) => ({
-        icon: "🔀",
         title: String(pullRequest?.title || "").trim()
           || `${pullRequest?.repo}#${pullRequest?.pr_number}`,
         url: pullRequest?.url || "",
@@ -747,9 +748,10 @@ function buildDeploymentStartedPresentation({
             slackUsernameByGithubUsername instanceof Map
               ? slackUsernameByGithubUsername
               : new Map(),
-        })} · ${pullRequest?.repo}#${pullRequest?.pr_number}`,
-        status: pullRequest?.tested ? "Tested" : "Included",
-        statusTone: pullRequest?.tested ? "success" : "info",
+        })} · ${pullRequest?.repo}#${pullRequest?.pr_number} · ${
+          pullRequest?.tested ? "Tested" : "Included"
+        }`,
+        inlineDescription: true,
       })),
     });
   }
@@ -757,22 +759,19 @@ function buildDeploymentStartedPresentation({
   return {
     tone: "info",
     title: `${environmentLabel} deployment started`,
-    status: {
-      detail: `${formatProviderLabel(deployProvider)}  •  ${String(deploymentId || "ID pending")}`,
-      label: "In progress",
-      tone: "info",
-    },
-    summary: missingDeploymentIdText || "",
+    summary: missingDeploymentIdText || `${environmentLabel} is now deploying.`,
     facts: [
       {
-        label: "Triggered by",
-        tone: "info",
-        value: deploymentTriggeredBy,
+        label: "Deployment ID",
+        value: formatDeploymentId({ deployAppId, deployProvider, deploymentId }),
       },
       {
-        label: "Changes",
-        tone: "info",
-        value: deployEnvironment === "prod" ? String(pullRequests.length) : "Staging build",
+        label: "Provider",
+        value: formatProviderLabel(deployProvider),
+      },
+      {
+        label: "Triggered by",
+        value: deploymentTriggeredBy,
       },
     ],
     sections,
@@ -850,6 +849,19 @@ function formatProviderLabel(provider) {
     return "AWS CodePipeline";
   }
   return normalizedProvider || "Unknown";
+}
+
+function formatDeploymentId({ deployAppId, deployProvider, deploymentId }) {
+  const normalizedDeploymentId = String(deploymentId || "n/a").trim() || "n/a";
+  const normalizedAppId = String(deployAppId || "").trim();
+  const normalizedProvider = String(deployProvider || "").trim().toLowerCase();
+  if (normalizedProvider !== "digitalocean" || !normalizedAppId || normalizedDeploymentId === "n/a") {
+    return normalizedDeploymentId;
+  }
+
+  const appUrl = `https://cloud.digitalocean.com/apps/${encodeURIComponent(normalizedAppId)}`;
+  const linkLabel = normalizedDeploymentId.replace(/[|>]/g, "");
+  return `<${appUrl}|${linkLabel}>`;
 }
 
 function normalizeDeployedPullRequests(deployedPullRequests) {
