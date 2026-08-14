@@ -2171,8 +2171,10 @@ test("registerCalypsoCommand sends deployment completion follow-up when enabled"
   assert.match(readResponseText(responses[1]), /Marked 2 PR\(s\) deployed/);
   assert.match(readResponseText(responses[1]), /Deployed PRs:/);
   assert.match(readResponseText(responses[1]), /<https:\/\/github\.com\/croft-eng\/croft\/pull\/12\|Add deploy gate> by <@U123ABC> \(tested\)\./);
-  assert.match(JSON.stringify(readSlackBlocks(responses[1])), /Awaiting post-deploy check/);
+  assert.doesNotMatch(JSON.stringify(readSlackBlocks(responses[1])), /Production health/);
+  assert.doesNotMatch(JSON.stringify(readSlackBlocks(responses[1])), /Awaiting post-deploy check/);
   assert.doesNotMatch(JSON.stringify(readSlackBlocks(responses[1])), /✅ Healthy/);
+  assert.match(JSON.stringify(readSlackBlocks(responses[1])), /Monitoring continues automatically/);
   assert.deepEqual(queryCalls, ["BEGIN", "COMMIT"]);
   assert.equal(insertedDeployment.externalDeployId, "dep-abc");
   assert.ok(insertedDeployment.deployedAt instanceof Date);

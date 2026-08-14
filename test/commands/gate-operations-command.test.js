@@ -57,6 +57,7 @@ test("gate close persists an audited reason and announces the transition", async
 
 test("history renders audited gate and deployment events", async () => {
   const handler = buildRegisteredHandler({
+    botName: "Voyager",
     communicationProvider: "slack",
     pool: {},
     listAuditEventsFn: async () => [
@@ -84,6 +85,9 @@ test("history renders audited gate and deployment events", async () => {
   });
 
   const payload = await runCommand(handler, "history prod");
+  assert.match(readResponseText(payload), /Recent Voyager activity/);
+  assert.match(readSlackBlocks(payload)[0].text.text, /Voyager activity/);
+  assert.doesNotMatch(JSON.stringify(readSlackBlocks(payload)), /Code Conductor activity/);
   const eventBlocks = readSlackBlocks(payload).filter(
     (block) =>
       block.type === "section"
