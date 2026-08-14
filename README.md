@@ -1042,6 +1042,14 @@ Rules:
 - Uses the same PR row format as review recap, including `Last modified` date (`M/D/YYYY`).
 - Groups rows by `Last modified` age with subheaders: last month, last 3 months, and 3+ months.
 
+`/conductor reviews send`
+
+- Restricted to workspace admins.
+- Immediately posts one review recap to the configured `review-recap-channel`, using the configured
+  recap window and the same tabs as the scheduled recap.
+- Does not consume a scheduled recap slot or change the next scheduled send.
+- Uses the currently stored review state; run `/conductor sync` first when you need a fresh code-host sync.
+
 `/conductor emails`
 
 - Lists pending customer support email items oldest-first.
@@ -1152,6 +1160,8 @@ Rules:
 ## Review Recap
 
 - Runs as a background scheduler in the app runtime.
+- Workspace admins can post an on-demand recap with `/conductor reviews send` without affecting the
+  scheduler's last-sent state.
 - Checks once per minute for configured recap slot (`daily@HH:MM` or `<weekday>@HH:MM`).
 - Optionally skips scheduled recap posts on weekends and/or observed US federal holidays.
 - Posts in-channel message in configured `review-recap-channel` containing:
