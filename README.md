@@ -1036,7 +1036,13 @@ Rules:
   configuration, channel-topic access, and background scheduler handles.
 - Reports configuration health without exposing credentials.
 
-`/conductor reviews [<GITHUB_USER>] [<day|week|month>]`
+`/conductor reviews`
+
+- Shows the review recap summary and category tabs (the same view as `reviews tab:summary`).
+
+`/conductor reviews <GITHUB_USER> [<day|week|month>]`
+
+`/conductor reviews <day|week|month>`
 
 - Lists open PRs waiting on review from review-tracking state.
 - Optional GitHub user filter (author login).

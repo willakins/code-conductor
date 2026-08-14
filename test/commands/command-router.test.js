@@ -138,12 +138,14 @@ test("handleCalypsoCommand rejects invalid sync input", () => {
   assert.match(result.responseText, /Usage: `\/conductor sync`/);
 });
 
-test("handleCalypsoCommand routes reviews input", () => {
+test("handleCalypsoCommand defaults reviews input to the recap summary tab", () => {
   const result = handleCalypsoCommand({ text: "reviews", user_id: "U123" });
+  const explicitSummaryResult = handleCalypsoCommand({
+    text: "reviews tab:summary",
+    user_id: "U123",
+  });
 
-  assert.equal(result.action, "reviews_list");
-  assert.equal(result.timeframe, null);
-  assert.equal(result.githubUser, null);
+  assert.deepEqual(result, explicitSummaryResult);
 });
 
 test("handleCalypsoCommand routes review recap tab actions", () => {
@@ -890,7 +892,7 @@ test("registerCalypsoCommand status reports a production red channel topic", asy
   assert.match(renderedBlocks, /Change the channel's Production topic marker from red/);
 });
 
-test("registerCalypsoCommand shows open waiting reviews without filters", async () => {
+test("registerCalypsoCommand shows the review recap summary without filters", async () => {
   let commandHandler;
   const app = {
     command(_name, handler) {
@@ -900,7 +902,13 @@ test("registerCalypsoCommand shows open waiting reviews without filters", async 
 
   registerCalypsoCommand(app, {
     pool: {},
-    listOpenPullRequestsWaitingOnReviewSinceFn: async () => [
+    getReviewRecapConfigFn: async () => ({
+      reviewScope: "all",
+      recencyValue: 1,
+      recencyUnit: "w",
+      timeZone: "America/New_York",
+    }),
+    listOpenPullRequestsForReviewRecapSinceFn: async () => [
       {
         repo: "croft-eng/croft",
         pr_number: 55,
@@ -909,10 +917,10 @@ test("registerCalypsoCommand shows open waiting reviews without filters", async 
         author_login: "octocat",
         is_draft: false,
         review_state: "waiting",
-        opened_for_review_at: "2026-02-13T22:00:17.000Z",
+        codex_approved: false,
+        last_modified_at: new Date().toISOString(),
       },
     ],
-    readTimeFormatPreferenceFn: async () => "human",
     readTimeZonePreferenceFn: async () => "America/New_York",
   });
 
@@ -926,22 +934,13 @@ test("registerCalypsoCommand shows open waiting reviews without filters", async 
   });
 
   assert.equal(payload.response_type, "ephemeral");
-  assert.match(payload.text, /Open PRs waiting on review:/);
-  assert.match(payload.text, /<https:\/\/github.com\/croft-eng\/croft\/pull\/55\|#55> - \*Add observability\*/);
-  assert.match(payload.text, /author: octocat/);
-  assert.match(payload.text, /review: waiting/);
-  assert.match(payload.text, /codex: not approved/);
-  assert.match(payload.text, /Last modified: 2\/13\/2026/);
-  const reviewBlocks = payload.attachments[0].blocks;
-  assert.match(reviewBlocks[0].text.text, /Pull request review queue/);
-  assert.match(JSON.stringify(reviewBlocks), /1 open/);
-  assert.match(JSON.stringify(reviewBlocks), /1 needs attention/);
-  const reviewRow = reviewBlocks.find((block) =>
-    block.type === "section" && block.fields?.some((field) => field.text.includes("#55")),
-  );
-  assert.match(reviewRow.fields[0].text, /#55  Add observability/);
-  assert.match(reviewRow.fields[1].text, /Review requested/);
-  assert.doesNotMatch(JSON.stringify(reviewBlocks), /⚠️|🔀/);
+  assert.match(payload.text, /PR Review Recap — all open non-draft PRs/);
+  assert.match(payload.text, /\*Unapproved · 1\*/);
+  const renderedBlocks = JSON.stringify(readSlackBlocks(payload));
+  assert.match(renderedBlocks, /PR review recap/);
+  assert.match(renderedBlocks, /Approved \(0\)/);
+  assert.match(renderedBlocks, /Unapproved \(1\)/);
+  assert.match(renderedBlocks, /Backburner \(0\)/);
 });
 
 test("registerCalypsoCommand opens a paginated recap tab", async () => {
@@ -1248,7 +1247,7 @@ test("registerCalypsoCommand sorts waiting reviews most recent first", async () 
 
   let payload;
   await commandHandler({
-    command: { text: "reviews", user_id: "U123" },
+    command: { text: "reviews octocat", user_id: "U123" },
     ack: async () => {},
     respond: async (message) => {
       payload = message;
@@ -1319,7 +1318,7 @@ test("registerCalypsoCommand groups waiting reviews by last-modified age buckets
 
   let payload;
   await commandHandler({
-    command: { text: "reviews", user_id: "U123" },
+    command: { text: "reviews octocat", user_id: "U123" },
     ack: async () => {},
     respond: async (message) => {
       payload = message;

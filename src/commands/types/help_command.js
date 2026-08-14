@@ -98,7 +98,7 @@ function buildOverviewHelpText(botName) {
     "`/conductor history` Show recent gate and deployment activity.",
     "`/conductor doctor` Check operational configuration.",
     "`/conductor deploy` Preview and confirm a deploy to the configured default environment.",
-    "`/conductor reviews` Show PRs waiting on review.",
+    "`/conductor reviews` Show the PR review recap summary.",
     "`/conductor errors` Show tracked unresolved errors.",
     "`/conductor emails` Show pending support emails.",
     "",
@@ -137,7 +137,7 @@ function buildReviewsHelpText(botName) {
   return [
     `*${botName} Reviews Help*`,
     "",
-    "`/conductor reviews` List open PRs waiting on review.",
+    "`/conductor reviews` Show the PR review recap summary and category tabs.",
     "`/conductor reviews <GITHUB_USER>` Filter by PR author.",
     "`/conductor reviews <day|week|month>` Filter by recency window.",
     "`/conductor reviews recent <day|week|month>` Explicit recent-window form.",
