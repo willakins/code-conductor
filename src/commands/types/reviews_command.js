@@ -127,14 +127,11 @@ class ReviewsCommand extends BaseCalypsoCommand {
       return this.allowAccess();
     }
 
-    const callerIsWorkspaceAdmin = await runtime.isWorkspaceAdminFn(
-      runtime.communicationClient,
-      runtime.userId,
-    );
-    if (!callerIsWorkspaceAdmin) {
+    const recapSendAccess = await runtime.resolveDeployAccessFn(runtime);
+    if (!recapSendAccess.canDeploy) {
       return this.denyAccess([
         "Review recap send denied.",
-        "Only workspace admins can send a one-time review recap.",
+        "Only workspace admins or whitelisted users can send a one-time review recap.",
       ].join("\n"));
     }
 
@@ -332,7 +329,7 @@ function buildUsageMessage() {
     "`/conductor reviews <day|week|month>`",
     "`/conductor reviews recent <day|week|month>`",
     "`/conductor reviews <GITHUB_USER> <day|week|month>`",
-    "`/conductor reviews send` (workspace admins only)",
+    "`/conductor reviews send` (workspace admins or whitelisted users only)",
   ].join("\n");
 }
 

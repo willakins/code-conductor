@@ -24,15 +24,21 @@ class HistoryCommand extends BaseCalypsoCommand {
       runtime.readTimeZonePreferenceFn(runtime),
     ]);
     if (events.length === 0) {
-      return this.buildExecutionResult("No Code Conductor audit events found.");
+      return this.buildExecutionResult(`No ${runtime.botName} audit events found.`, {
+        presentation: {
+          tone: "neutral",
+          title: `${runtime.botName} activity`,
+          summary: "No audit events found.",
+        },
+      });
     }
 
     return this.buildExecutionResult(
-      ["Recent Code Conductor activity:", ...events.map((event) => `• ${event.summary}`)].join("\n"),
+      [`Recent ${runtime.botName} activity:`, ...events.map((event) => `• ${event.summary}`)].join("\n"),
       {
         presentation: {
           tone: "neutral",
-          title: "Code Conductor activity",
+          title: `${runtime.botName} activity`,
           summary: parsedCommand.environment
             ? `Recent ${parsedCommand.environment} gate and deployment events.`
             : "Recent gate and deployment events.",

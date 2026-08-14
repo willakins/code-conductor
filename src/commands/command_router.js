@@ -281,17 +281,22 @@ function buildDeploymentCompletionSuccessPresentation({
     completedRun?.completed_at,
   );
   const completedAt = completedRun?.completed_at || null;
+  const deploymentReference = formatDeploymentReference({
+    deployAppId: executionResult.deployConfigOverrides?.deployProductionAppId,
+    externalDeploymentId,
+    provider,
+  });
   const facts = [
     {
       label: "Deployment details",
       value: [
         `🔀 ${formatPullRequestCount(deployedPullRequestCount)}`,
-        `🏗️ ${formatDeployProvider(provider)} · Deployment ${externalDeploymentId}`,
+        `🏗️ ${formatDeployProvider(provider)} · ${deploymentReference}`,
         duration ? `🕒 Completed in ${duration}` : "",
       ].filter(Boolean).join("\n"),
     },
     buildDeploymentHealthFact(environmentStatus, completedAt),
-  ];
+  ].filter(Boolean);
 
   return {
     tone: "success",
@@ -316,15 +321,11 @@ function buildDeploymentCompletionSuccessPresentation({
 }
 
 function buildDeploymentHealthFact(environmentStatus, completedAt) {
-  if (!environmentStatus) {
-    return { label: "Production health", value: "⚠️ Status unavailable" };
-  }
-  if (!environmentStatus?.enabled) {
-    return { label: "Production health", value: "🎛️ Monitoring off" };
-  }
-
-  if (!isHealthObservationAfterDeployment(environmentStatus.lastCheckedAt, completedAt)) {
-    return { label: "Production health", value: "⚠️ Awaiting post-deploy check" };
+  if (
+    !environmentStatus?.enabled
+    || !isHealthObservationAfterDeployment(environmentStatus.lastCheckedAt, completedAt)
+  ) {
+    return null;
   }
 
   const state = String(environmentStatus.lastObservedState || "unknown").toLowerCase();
@@ -337,7 +338,7 @@ function buildDeploymentHealthFact(environmentStatus, completedAt) {
   if (state === "unhealthy") {
     return { label: "Production health", value: `⛔ Unhealthy${httpStatus}` };
   }
-  return { label: "Production health", value: "⚠️ Awaiting first check" };
+  return null;
 }
 
 function isHealthObservationAfterDeployment(lastCheckedAt, completedAt) {
@@ -354,6 +355,17 @@ function formatDeployProvider(provider) {
   if (normalizedProvider === "digitalocean") return "DigitalOcean";
   if (normalizedProvider === "aws") return "AWS CodePipeline";
   return normalizedProvider || "Unknown provider";
+}
+
+function formatDeploymentReference({ deployAppId, externalDeploymentId, provider }) {
+  const label = `Deployment ${externalDeploymentId}`;
+  const normalizedAppId = String(deployAppId || "").trim();
+  const normalizedProvider = String(provider || "").trim().toLowerCase();
+  if (normalizedProvider !== "digitalocean" || !normalizedAppId) {
+    return label;
+  }
+
+  return `<https://cloud.digitalocean.com/apps/${encodeURIComponent(normalizedAppId)}|${label}>`;
 }
 
 function formatDeploymentDuration(startedAt, completedAt) {

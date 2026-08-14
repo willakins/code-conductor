@@ -991,7 +991,7 @@ test("registerCalypsoCommand opens a paginated recap tab", async () => {
   assert.match(renderedBlocks, /reviews tab:approved page:2/);
 });
 
-test("registerCalypsoCommand denies one-time review recap sends for non-admins", async () => {
+test("registerCalypsoCommand denies one-time review recap sends for unauthorized users", async () => {
   let commandHandler;
   const postCalls = [];
   const app = {
@@ -1002,7 +1002,7 @@ test("registerCalypsoCommand denies one-time review recap sends for non-admins",
 
   registerCalypsoCommand(app, {
     pool: {},
-    isWorkspaceAdminFn: async () => false,
+    resolveDeployAccessFn: async () => ({ canDeploy: false }),
     postChannelMessageFn: async (message) => postCalls.push(message),
   });
 
@@ -1018,8 +1018,53 @@ test("registerCalypsoCommand denies one-time review recap sends for non-admins",
 
   assert.equal(payload.response_type, "ephemeral");
   assert.match(readResponseText(payload), /Review recap send denied/);
-  assert.match(readResponseText(payload), /Only workspace admins can send a one-time review recap/);
+  assert.match(
+    readResponseText(payload),
+    /Only workspace admins or whitelisted users can send a one-time review recap/,
+  );
   assert.equal(postCalls.length, 0);
+});
+
+test("registerCalypsoCommand lets bot-whitelisted users post one review recap", async () => {
+  let commandHandler;
+  const postCalls = [];
+  const app = {
+    command(_name, handler) {
+      commandHandler = handler;
+    },
+  };
+
+  registerCalypsoCommand(app, {
+    pool: {},
+    resolveDeployAccessFn: async () => ({
+      canDeploy: true,
+      source: "deploy_whitelist",
+    }),
+    isWorkspaceAdminFn: async () => false,
+    getReviewRecapConfigFn: async () => ({
+      targetChannelId: "C_REVIEW",
+      reviewScope: "all",
+      recencyValue: 1,
+      recencyUnit: "w",
+      timeZone: "America/New_York",
+    }),
+    listOpenPullRequestsForReviewRecapSinceFn: async () => [],
+    postChannelMessageFn: async (message) => postCalls.push(message),
+  });
+
+  let payload;
+  await commandHandler({
+    command: { text: "reviews send", user_id: "UWHITELISTED" },
+    client: {},
+    ack: async () => {},
+    respond: async (message) => {
+      payload = message;
+    },
+  });
+
+  assert.equal(payload.response_type, "ephemeral");
+  assert.equal(readResponseText(payload), "Review recap sent to the configured channel.");
+  assert.equal(postCalls.length, 1);
 });
 
 test("registerCalypsoCommand lets admins post one review recap without consuming a scheduled slot", async () => {
@@ -1042,10 +1087,10 @@ test("registerCalypsoCommand lets admins post one review recap without consuming
       recencyUnit: "w",
       timeZone: "America/New_York",
     }),
-    isWorkspaceAdminFn: async (client, userId) => {
-      assert.equal(client, commandClient);
-      assert.equal(userId, "UADMIN");
-      return true;
+    resolveDeployAccessFn: async (runtime) => {
+      assert.equal(runtime.communicationClient, commandClient);
+      assert.equal(runtime.userId, "UADMIN");
+      return { canDeploy: true, source: "workspace_admin" };
     },
     listOpenPullRequestsForReviewRecapSinceFn: async () => [{
       repo: "croft-eng/croft",
@@ -2046,6 +2091,7 @@ test("registerCalypsoCommand sends deployment completion follow-up when enabled"
   };
 
   registerCalypsoCommand(app, {
+    botName: "Voyager",
     enableDeploymentCompletionNotifications: true,
     pool,
     resolveDeployAccessFn: async () => ({ canDeploy: true }),
@@ -2101,6 +2147,22 @@ test("registerCalypsoCommand sends deployment completion follow-up when enabled"
   assert.match(readResponseText(responses[0]), /PRs to deploy:/);
   assert.match(readResponseText(responses[0]), /Add deploy gate> by <@U123ABC> \(tested\)\./);
   assert.doesNotMatch(readResponseText(responses[0]), /Marked 2 PR\(s\) deployed/);
+  assert.match(
+    JSON.stringify(readSlackBlocks(responses[0])),
+    /Voyager will post again when the provider reports completion/,
+  );
+  assert.doesNotMatch(
+    JSON.stringify(readSlackBlocks(responses[0])),
+    /Code Conductor will post again/,
+  );
+  assert.match(
+    JSON.stringify(readSlackBlocks(responses[0])),
+    /Add deploy gate[^}]+by <@U123ABC> · Tested/,
+  );
+  assert.doesNotMatch(
+    JSON.stringify(readSlackBlocks(responses[0])),
+    /· croft-eng\/croft#12 ·/,
+  );
   assert.equal(responses[1].response_type, "in_channel");
   assert.match(
     readResponseText(responses[1]),
@@ -2109,8 +2171,10 @@ test("registerCalypsoCommand sends deployment completion follow-up when enabled"
   assert.match(readResponseText(responses[1]), /Marked 2 PR\(s\) deployed/);
   assert.match(readResponseText(responses[1]), /Deployed PRs:/);
   assert.match(readResponseText(responses[1]), /<https:\/\/github\.com\/croft-eng\/croft\/pull\/12\|Add deploy gate> by <@U123ABC> \(tested\)\./);
-  assert.match(JSON.stringify(readSlackBlocks(responses[1])), /Awaiting post-deploy check/);
+  assert.doesNotMatch(JSON.stringify(readSlackBlocks(responses[1])), /Production health/);
+  assert.doesNotMatch(JSON.stringify(readSlackBlocks(responses[1])), /Awaiting post-deploy check/);
   assert.doesNotMatch(JSON.stringify(readSlackBlocks(responses[1])), /✅ Healthy/);
+  assert.match(JSON.stringify(readSlackBlocks(responses[1])), /Monitoring continues automatically/);
   assert.deepEqual(queryCalls, ["BEGIN", "COMMIT"]);
   assert.equal(insertedDeployment.externalDeployId, "dep-abc");
   assert.ok(insertedDeployment.deployedAt instanceof Date);

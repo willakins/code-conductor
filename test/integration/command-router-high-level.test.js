@@ -144,7 +144,7 @@ test("high-level command lifecycle: status -> confirmed deploy -> status", async
   );
   assert.match(
     changesIncludedBlock.text.text,
-    /<https:\/\/github\.com\/croft-eng\/croft\/pull\/700\|Feature PR> by <@U123ABC> · croft-eng\/croft#700 · Included/,
+    /<https:\/\/github\.com\/croft-eng\/croft\/pull\/700\|Feature PR> by <@U123ABC> · Included/,
   );
   assert.equal(
     deployStartedBlocks.filter((block) =>
@@ -170,7 +170,10 @@ test("high-level command lifecycle: status -> confirmed deploy -> status", async
   );
   assert.equal(deploymentSummaryBlock.fields.length, 2);
   assert.match(deploymentSummaryBlock.fields[0].text, /🔀 1 pull request/);
-  assert.match(deploymentSummaryBlock.fields[0].text, /🏗️ DigitalOcean · Deployment dep-999/);
+  assert.match(
+    deploymentSummaryBlock.fields[0].text,
+    /🏗️ DigitalOcean · <https:\/\/cloud\.digitalocean\.com\/apps\/app\|Deployment dep-999>/,
+  );
   assert.match(deploymentSummaryBlock.fields[0].text, /🕒 Completed in 4m 12s/);
   assert.match(deploymentSummaryBlock.fields[1].text, /Production health/);
   assert.match(deploymentSummaryBlock.fields[1].text, /✅ Healthy · HTTP 200/);

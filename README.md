@@ -1053,7 +1053,7 @@ Rules:
 
 `/conductor reviews send`
 
-- Restricted to workspace admins.
+- Restricted to workspace admins and deploy-whitelisted users.
 - Immediately posts one review recap to the configured `review-recap-channel`, using the configured
   recap window and the same tabs as the scheduled recap.
 - Does not consume a scheduled recap slot or change the next scheduled send.
@@ -1169,8 +1169,8 @@ Rules:
 ## Review Recap
 
 - Runs as a background scheduler in the app runtime.
-- Workspace admins can post an on-demand recap with `/conductor reviews send` without affecting the
-  scheduler's last-sent state.
+- Workspace admins and deploy-whitelisted users can post an on-demand recap with
+  `/conductor reviews send` without affecting the scheduler's last-sent state.
 - Checks once per minute for configured recap slot (`daily@HH:MM` or `<weekday>@HH:MM`).
 - Optionally skips scheduled recap posts on weekends and/or observed US federal holidays.
 - Posts in-channel message in configured `review-recap-channel` containing:
