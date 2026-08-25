@@ -2259,6 +2259,96 @@ test("registerCalypsoCommand tags here when deployment completion fails", async 
   assert.equal(marked, false);
 });
 
+for (const interruptionScenario of [
+  {
+    deploymentPhase: "CANCELED",
+    expectedExplanation: /A newer deployment or configuration change may have replaced it/,
+    expectedOutcome: /was canceled by the provider/,
+    expectedTitle: /Deployment canceled/,
+  },
+  {
+    deploymentPhase: "SUPERSEDED",
+    expectedExplanation: /A newer provider deployment replaced it/,
+    expectedOutcome: /was superseded by the provider/,
+    expectedTitle: /Deployment superseded/,
+  },
+]) {
+  test(`registerCalypsoCommand explains ${interruptionScenario.deploymentPhase} deployments`, async () => {
+    let commandHandler;
+    let inserted = false;
+    let marked = false;
+    const app = {
+      command(_name, handler) {
+        commandHandler = handler;
+      },
+    };
+
+    registerCalypsoCommand(app, {
+      enableDeploymentCompletionNotifications: true,
+      pool: {
+        async query() {
+          return { rows: [] };
+        },
+      },
+      resolveDeployAccessFn: async () => ({ canDeploy: true }),
+      getLastProdDeployAtFn: async () => "1970-01-01T00:00:00.000Z",
+      listBlockingPullRequestsFn: async () => [],
+      listDeployablePullRequestsForDeploymentFn: async () => [],
+      triggerProdDeployFn: async () => ({ externalDeployId: "dep-abc" }),
+      insertDeploymentFn: async () => {
+        inserted = true;
+      },
+      markPullRequestsDeployedFn: async () => {
+        marked = true;
+      },
+      waitForProdDeployCompletionFn: async () => {
+        const error = new Error(
+          `DigitalOcean deployment dep-abc finished with phase ${interruptionScenario.deploymentPhase}.`,
+        );
+        error.code = "DEPLOYMENT_INTERRUPTED";
+        error.deploymentPhase = interruptionScenario.deploymentPhase;
+        throw error;
+      },
+      deployConfig: {
+        digitaloceanToken: "token",
+        doAppIdProd: "app-id",
+        doDeploymentPollIntervalMs: 1,
+        doDeploymentTimeoutMs: 1000,
+      },
+    });
+
+    const responses = [];
+    await commandHandler({
+      command: { text: "deploy prod", user_id: "U123" },
+      ack: async () => {},
+      respond: async (message) => {
+        responses.push(message);
+      },
+    });
+
+    assert.equal(responses.length, 2);
+    assert.match(
+      readResponseText(responses[1]),
+      interruptionScenario.expectedOutcome,
+    );
+    assert.match(
+      readResponseText(responses[1]),
+      interruptionScenario.expectedExplanation,
+    );
+    assert.doesNotMatch(readResponseText(responses[1]), /failed after trigger/);
+    assert.match(
+      readSlackBlocks(responses[1])[0].text.text,
+      interruptionScenario.expectedTitle,
+    );
+    assert.match(
+      readSlackBlocks(responses[1])[1].text.text,
+      /This does not necessarily mean the app failed to deploy/,
+    );
+    assert.equal(inserted, false);
+    assert.equal(marked, false);
+  });
+}
+
 test("registerCalypsoCommand does not finalize production deployment without external deployment id", async () => {
   let commandHandler;
   let inserted = false;
