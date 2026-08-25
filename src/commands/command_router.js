@@ -387,6 +387,23 @@ function formatPullRequestCount(count) {
 
 function buildDeploymentCompletionFailurePresentation({ externalDeploymentId, error }) {
   const stateCommitFailed = error?.code === "DEPLOY_STATE_ROLLED_BACK";
+  const deploymentInterrupted = error?.code === "DEPLOYMENT_INTERRUPTED";
+  if (deploymentInterrupted) {
+    const interruption = describeDeploymentInterruption(error);
+    return {
+      tone: "warning",
+      title: interruption.title,
+      summary: interruption.summary,
+      facts: [
+        {
+          label: "Deployment ID",
+          value: externalDeploymentId,
+        },
+      ],
+      context: "No deployment record or PR status was committed for this interrupted deployment.",
+    };
+  }
+
   return {
     tone: "danger",
     title: stateCommitFailed ? "Deployment state update failed" : "Deployment failed",
@@ -405,8 +422,30 @@ function buildDeploymentCompletionFailureText({ externalDeploymentId, error }) {
   if (error?.code === "DEPLOY_STATE_ROLLED_BACK") {
     return `${SLACK_HERE_MENTION} Deployment ${externalDeploymentId} finished, but Code Conductor could not commit deployment state: ${error.message} No deploy records or PR statuses were committed.`;
   }
+  if (error?.code === "DEPLOYMENT_INTERRUPTED") {
+    const interruption = describeDeploymentInterruption(error);
+    return `${SLACK_HERE_MENTION} Deployment ${externalDeploymentId} ${interruption.outcome}. ${interruption.explanation}. No deploy records or PR statuses were committed for this interrupted deployment.`;
+  }
 
   return `${SLACK_HERE_MENTION} Deployment ${externalDeploymentId} failed after trigger: ${error.message}. No deploy records or PR statuses were committed.`;
+}
+
+function describeDeploymentInterruption(error) {
+  if (error?.deploymentPhase === "SUPERSEDED") {
+    return {
+      title: "Deployment superseded",
+      outcome: "was superseded by the provider",
+      explanation: "A newer provider deployment replaced it",
+      summary: "The provider replaced this deployment with a newer one. This does not necessarily mean the app failed to deploy.",
+    };
+  }
+
+  return {
+    title: "Deployment canceled",
+    outcome: "was canceled by the provider",
+    explanation: "A newer deployment or configuration change may have replaced it",
+    summary: "The provider canceled this deployment. This commonly happens when a newer deployment or configuration change replaces one already in progress. This does not necessarily mean the app failed to deploy.",
+  };
 }
 
 async function waitForDeploymentCompletionAndFinalize({

@@ -122,6 +122,35 @@ test("waitForAppDeploymentCompletion throws on terminal failure phase", async ()
   );
 });
 
+for (const deploymentPhase of ["CANCELED", "CANCELLED", "SUPERSEDED"]) {
+  test(`waitForAppDeploymentCompletion identifies ${deploymentPhase} as interrupted`, async () => {
+    await withMockedFetch(
+      async () => ({
+        ok: true,
+        async json() {
+          return { deployment: { id: "dep-123", phase: deploymentPhase } };
+        },
+      }),
+      async () => {
+        const client = createDigitalOceanClient({ token: "token-123" });
+
+        await assert.rejects(
+          () =>
+            client.waitForAppDeploymentCompletion("app-123", "dep-123", {
+              pollIntervalMs: 1,
+              timeoutMs: 20,
+            }),
+          (error) => {
+            assert.equal(error.code, "DEPLOYMENT_INTERRUPTED");
+            assert.equal(error.deploymentPhase, deploymentPhase);
+            return true;
+          },
+        );
+      },
+    );
+  });
+}
+
 async function withMockedFetch(mockImplementation, fn) {
   const originalFetch = global.fetch;
   global.fetch = mockImplementation;

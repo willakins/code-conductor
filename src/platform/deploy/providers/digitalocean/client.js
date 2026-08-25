@@ -1,3 +1,6 @@
+const FAILED_DEPLOYMENT_PHASES = new Set(["ERROR", "FAILED"]);
+const INTERRUPTED_DEPLOYMENT_PHASES = new Set(["CANCELED", "CANCELLED", "SUPERSEDED"]);
+
 function createDigitalOceanClient({ token }) {
   ensureRequiredValueExists(token, "DEPLOY_TOKEN");
 
@@ -37,9 +40,7 @@ function createDigitalOceanClient({ token }) {
         }
 
         if (isFailedDeploymentPhase(deploymentState.phase)) {
-          throw new Error(
-            `DigitalOcean deployment ${deploymentId} finished with phase ${deploymentState.phase}.`,
-          );
+          throw buildDeploymentCompletionError(deploymentId, deploymentState.phase);
         }
 
         await sleep(pollIntervalMs);
@@ -128,7 +129,18 @@ function readDeploymentPhase(deployment) {
 }
 
 function isFailedDeploymentPhase(phase) {
-  return ["ERROR", "FAILED", "CANCELED", "CANCELLED", "SUPERSEDED"].includes(phase);
+  return FAILED_DEPLOYMENT_PHASES.has(phase) || INTERRUPTED_DEPLOYMENT_PHASES.has(phase);
+}
+
+function buildDeploymentCompletionError(deploymentId, deploymentPhase) {
+  const error = new Error(
+    `DigitalOcean deployment ${deploymentId} finished with phase ${deploymentPhase}.`,
+  );
+  if (INTERRUPTED_DEPLOYMENT_PHASES.has(deploymentPhase)) {
+    error.code = "DEPLOYMENT_INTERRUPTED";
+    error.deploymentPhase = deploymentPhase;
+  }
+  return error;
 }
 
 function readPositiveInteger(value, fallback) {
