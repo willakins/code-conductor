@@ -11,7 +11,8 @@
     "stop": "bash scripts/runtime/stop.sh",
     "stop:long": "bash scripts/runtime/stop_long.sh",
     "stop:long:all": "bash scripts/runtime/stop_long_all.sh",
-    "test": "node --test"
+    "test": "node --test",
+    "previews": "node docs/assets/previews/build.cjs"
   },
   "repository": {
     "type": "git",

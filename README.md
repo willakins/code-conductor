@@ -38,6 +38,10 @@ from the active code host so the team can see where attention is needed without 
 
 ![Code Conductor pull request review queue in Slack](docs/assets/screenshots/slack-scene-review-queue.png)
 
+Open a category to see its pull requests, authors, review status, and last-modified dates.
+
+![Code Conductor human approval category in Slack](docs/assets/screenshots/slack-scene-review-category.png)
+
 ### Make readiness visible
 
 Code Conductor combines deployment gates, required tests, merged changes, deployment history, and
@@ -53,9 +57,10 @@ completion, records the result atomically, announces what shipped, and continues
 ![Code Conductor automated production deployment in Slack](docs/assets/screenshots/slack-scene-automated-deploy.png)
 
 > [!NOTE]
-> The screenshots mirror the fields, actions, visibility, two-column layout, and tone accents emitted
-> by the current Block Kit renderer. Slack controls final typography and spacing, while message content
-> varies with live provider and database state.
+> The previews render message content from the current command and Block Kit code with fictional
+> workspace data, a shared bot icon, and three fixed participant portraits. The Slack shell is a local
+> approximation; Slack controls final typography and spacing. Sources, assets, and regeneration
+> instructions live in [docs/assets](docs/assets/README.md).
 
 ## One Workflow, Pluggable Providers
 
