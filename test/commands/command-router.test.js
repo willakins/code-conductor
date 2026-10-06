@@ -959,7 +959,7 @@ test("registerCalypsoCommand opens a paginated recap tab", async () => {
     author_login: "octocat",
     review_state: "approved",
     codex_approved: true,
-    last_modified_at: "2026-08-13T12:00:00.000Z",
+    last_modified_at: new Date().toISOString(),
   }));
 
   registerCalypsoCommand(app, {

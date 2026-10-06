@@ -1133,6 +1133,8 @@ Rules:
   - labels each PR that was tested with `(tested)`
   - does not insert a `deployments` row yet
   - does not mark PRs as `deployed` yet
+- DigitalOcean deployments are polled until DigitalOcean reports a terminal status, with no
+  overall deployment timeout. Builds that take longer than 20 minutes continue to be monitored.
 - After the deploy provider reports success:
   - inserts a `deployments` row
   - marks only the planned PRs as `deployed`
