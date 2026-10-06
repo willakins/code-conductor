@@ -92,7 +92,6 @@ test("waitForAppDeploymentCompletion resolves when deployment reaches ACTIVE", a
       const client = createDigitalOceanClient({ token: "token-123" });
       const result = await client.waitForAppDeploymentCompletion("app-123", "dep-123", {
         pollIntervalMs: 1,
-        timeoutMs: 20,
       });
 
       assert.deepEqual(result, { id: "dep-123", phase: "ACTIVE" });
@@ -114,7 +113,6 @@ test("waitForAppDeploymentCompletion throws on terminal failure phase", async ()
         () =>
           client.waitForAppDeploymentCompletion("app-123", "dep-123", {
             pollIntervalMs: 1,
-            timeoutMs: 20,
           }),
         /finished with phase ERROR/,
       );
@@ -138,7 +136,6 @@ for (const deploymentPhase of ["CANCELED", "CANCELLED", "SUPERSEDED"]) {
           () =>
             client.waitForAppDeploymentCompletion("app-123", "dep-123", {
               pollIntervalMs: 1,
-              timeoutMs: 20,
             }),
           (error) => {
             assert.equal(error.code, "DEPLOYMENT_INTERRUPTED");
@@ -160,4 +157,43 @@ async function withMockedFetch(mockImplementation, fn) {
   } finally {
     global.fetch = originalFetch;
   }
+}
+
+for (const terminalPhase of ["ACTIVE", "ERROR", "CANCELED"]) {
+  test(`waitForAppDeploymentCompletion waits past the former deadline for ${terminalPhase}`, async () => {
+    const originalNow = Date.now;
+    let now = originalNow();
+    let polls = 0;
+    Date.now = () => now;
+
+    try {
+      await withMockedFetch(
+        async () => {
+          polls += 1;
+          now += 21 * 60 * 1000;
+          const phase = polls === 1 ? "BUILDING" : polls === 2 ? "DEPLOYING" : terminalPhase;
+          return {
+            ok: true,
+            async json() {
+              return { deployment: { id: "dep-123", phase } };
+            },
+          };
+        },
+        async () => {
+          const client = createDigitalOceanClient({ token: "token-123" });
+          const completion = client.waitForAppDeploymentCompletion("app-123", "dep-123", {
+            pollIntervalMs: 1,
+          });
+          if (terminalPhase === "ACTIVE") {
+            assert.deepEqual(await completion, { id: "dep-123", phase: "ACTIVE" });
+          } else {
+            await assert.rejects(completion, new RegExp(`finished with phase ${terminalPhase}`));
+          }
+          assert.equal(polls, 3);
+        },
+      );
+    } finally {
+      Date.now = originalNow;
+    }
+  });
 }

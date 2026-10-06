@@ -27,13 +27,9 @@ function createDigitalOceanClient({ token }) {
       ensureRequiredValueExists(deploymentId, "external deployment id");
 
       const pollIntervalMs = readPositiveInteger(options.pollIntervalMs, 10000);
-      const timeoutMs = readPositiveInteger(options.timeoutMs, 20 * 60 * 1000);
-      const deadlineTimestamp = Date.now() + timeoutMs;
-      let lastKnownPhase = "unknown";
 
-      while (Date.now() <= deadlineTimestamp) {
+      while (true) {
         const deploymentState = await fetchDeploymentState({ token, appId, deploymentId });
-        lastKnownPhase = deploymentState.phase;
 
         if (deploymentState.phase === "ACTIVE") {
           return deploymentState;
@@ -45,10 +41,6 @@ function createDigitalOceanClient({ token }) {
 
         await sleep(pollIntervalMs);
       }
-
-      throw new Error(
-        `DigitalOcean deployment ${deploymentId} did not finish before timeout. Last known phase: ${lastKnownPhase}.`,
-      );
     },
   };
 }

@@ -18,14 +18,12 @@ class DigitalOceanDeployPlatform extends BaseDeployPlatform {
     const deployProductionAppId = deployConfig.deployProductionAppId || deployConfig.doAppIdProd;
     const deploymentPollIntervalMs =
       deployConfig.deploymentPollIntervalMs || deployConfig.doDeploymentPollIntervalMs;
-    const deploymentTimeoutMs = deployConfig.deploymentTimeoutMs || deployConfig.doDeploymentTimeoutMs;
     const digitalOceanClient = createDigitalOceanClient({ token: deployToken });
     return digitalOceanClient.waitForAppDeploymentCompletion(
       deployProductionAppId,
       externalDeployId,
       {
         pollIntervalMs: deploymentPollIntervalMs,
-        timeoutMs: deploymentTimeoutMs,
       },
     );
   }
