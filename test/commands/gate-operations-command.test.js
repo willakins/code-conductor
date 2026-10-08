@@ -55,6 +55,58 @@ test("gate close persists an audited reason and announces the transition", async
   assert.ok(readSlackBlocks(payload).some((block) => block.type === "actions"));
 });
 
+for (const status of ["open", "closed"]) {
+  for (const responseKind of ["transition", "status", "unchanged"]) {
+    test(`Slack ${status} gate ${responseKind} mentions the actor`, async () => {
+      const state = {
+        changed_by: "U092UMU4T4Z",
+        environment: "prod",
+        reason: status === "closed" ? "testing important pr" : null,
+        status,
+      };
+      const handler = buildRegisteredHandler({
+        communicationProvider: "slack",
+        pool: {},
+        resolveDeployAccessFn: async () => ({ canDeploy: true }),
+        getDeploymentGateStateFn: async () => responseKind === "transition" ? null : state,
+        setDeploymentGateStateWithAuditFn: async () => ({ state }),
+        updateCurrentChannelTopicFn: async () => false,
+      });
+      const command = responseKind === "status"
+        ? "gate status prod"
+        : `gate ${status === "closed" ? "close" : "open"} prod${state.reason ? ` ${state.reason}` : ""}`;
+
+      const payload = await runCommand(handler, command);
+      const actorField = readSlackBlocks(payload)
+        .flatMap((block) => block.fields || [])
+        .find((field) => field.text.includes("Changed by"));
+
+      assert.equal(actorField.type, "mrkdwn");
+      assert.match(actorField.text, /<@U092UMU4T4Z>/);
+      if (responseKind === "transition") {
+        assert.match(JSON.stringify(readSlackBlocks(payload)), /channel topic could not be updated/);
+      }
+    });
+  }
+}
+
+test("Teams gate presentation preserves its actor identifier", async () => {
+  const { GateCommand } = require("../../src/commands/types/gate_command");
+  const result = await new GateCommand().execute({
+    parsedCommand: { action: "gate_status", environment: "prod" },
+    runtime: {
+      communicationProvider: "teams",
+      pool: {},
+      getDeploymentGateStateFn: async () => ({ status: "closed", changed_by: "teams-user-id" }),
+    },
+  });
+
+  assert.deepEqual(result.presentation.facts.find((fact) => fact.label === "Changed by"), {
+    label: "Changed by",
+    value: "teams-user-id",
+  });
+});
+
 test("history renders audited gate and deployment events", async () => {
   const handler = buildRegisteredHandler({
     botName: "Voyager",

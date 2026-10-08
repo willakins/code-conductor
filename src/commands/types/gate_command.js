@@ -72,7 +72,7 @@ class GateCommand extends BaseCalypsoCommand {
         ? `${labelEnvironment(parsedCommand.environment)} gate is explicitly ${state.status}.`
         : `${labelEnvironment(parsedCommand.environment)} gate is ${displayedState.status} from the channel-topic fallback.`;
       return this.buildExecutionResult(summary, {
-        presentation: buildGatePresentation(displayedState, parsedCommand.environment),
+        presentation: buildGatePresentation(displayedState, parsedCommand.environment, { communicationProvider: runtime.communicationProvider }),
       });
     }
 
@@ -88,7 +88,7 @@ class GateCommand extends BaseCalypsoCommand {
     ) {
       return this.buildExecutionResult(
         `${labelEnvironment(parsedCommand.environment)} deployment gate is already ${status}.`,
-        { presentation: buildGatePresentation(existingState, parsedCommand.environment) },
+        { presentation: buildGatePresentation(existingState, parsedCommand.environment, { communicationProvider: runtime.communicationProvider }) },
       );
     }
     const summary = `${labelEnvironment(parsedCommand.environment)} deployment gate ${status} by ${runtime.userId || "unknown user"}.`;
@@ -111,7 +111,7 @@ class GateCommand extends BaseCalypsoCommand {
     }
     return this.buildExecutionResult(summary, {
       gateChanged: true,
-      presentation: buildGatePresentation(state, state.environment, { topicMirrored }),
+      presentation: buildGatePresentation(state, state.environment, { topicMirrored, communicationProvider: runtime.communicationProvider }),
     });
   }
 
@@ -120,7 +120,7 @@ class GateCommand extends BaseCalypsoCommand {
   }
 }
 
-function buildGatePresentation(state, environment, { topicMirrored = null } = {}) {
+function buildGatePresentation(state, environment, { topicMirrored = null, communicationProvider } = {}) {
   const hasExplicitState = Boolean(state);
   const status = state?.status || "topic fallback";
   return {
@@ -133,7 +133,7 @@ function buildGatePresentation(state, environment, { topicMirrored = null } = {}
       : "No explicit state has been set; Code Conductor will use the channel topic.",
     facts: [
       { label: "State", value: status },
-      ...(state?.changed_by ? [{ label: "Changed by", value: state.changed_by }] : []),
+      ...(state?.changed_by ? [{ label: "Changed by", value: formatGateActor(state.changed_by, communicationProvider) }] : []),
     ],
     sections: state?.reason ? [{ title: "Reason", text: state.reason }] : [],
     context: topicMirrored === true
@@ -148,6 +148,17 @@ function buildGatePresentation(state, environment, { topicMirrored = null } = {}
       { id: "refresh_status", label: "Refresh status", command: "status" },
     ],
   };
+}
+
+function formatGateActor(userId, communicationProvider) {
+  const normalizedUserId = String(userId || "").trim();
+  if (
+    String(communicationProvider || "").trim().toLowerCase() === "slack"
+    && /^[UW][A-Z0-9]+$/i.test(normalizedUserId)
+  ) {
+    return `<@${normalizedUserId.toUpperCase()}>`;
+  }
+  return normalizedUserId;
 }
 
 function normalizeEnvironment(value) {
