@@ -1015,6 +1015,7 @@ Rules:
 `/conductor gate status [prod|staging]`
 
 - Shows whether an environment uses an explicit gate or the channel-topic fallback.
+- Slack gate messages mention the user in **Changed by** for status and open/close responses.
 
 `/conductor gate close <prod|staging> <REASON>`
 
