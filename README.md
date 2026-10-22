@@ -1152,6 +1152,8 @@ Rules:
   - does not write deployment row
   - does not mark PRs deployed
 - After trigger, Code Conductor sends a follow-up message when the deploy provider finishes the deployment.
+  Slack completion messages use the bot API in the originating channel, so deployments that outlast
+  the original command response URL can still announce success or failure.
 - Code Conductor atomically reserves one active deployment run per environment before calling the provider,
   preventing simultaneous deploy commands from triggering duplicate deployments.
 - Reservation, trigger, success, failure, and untracked-provider transitions are recorded in
