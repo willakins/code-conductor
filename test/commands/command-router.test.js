@@ -4139,3 +4139,45 @@ function readSlackBlocks(message) {
 function readResponseText(message) {
   return message.text || message.attachments?.[0]?.fallback || "";
 }
+
+for (const fails of [false, true]) {
+  test(`Slack posts long deployment ${fails ? "failure" : "success"} through the bot after the response URL expires`, async () => {
+    let handler;
+    let expired = false;
+    const posts = [];
+    const responses = [];
+    registerCalypsoCommand({ command(_name, fn) { handler = fn; } }, {
+      communicationProvider: "slack",
+      enableDeploymentCompletionNotifications: true,
+      pool: {},
+      resolveDeployAccessFn: async () => ({ canDeploy: true }),
+      triggerProdDeployFn: async () => ({ externalDeployId: "dep-long" }),
+      waitForProdDeployCompletionFn: async () => {
+        expired = true;
+        if (fails) throw new Error("deployment errored");
+        return { id: "dep-long", phase: "ACTIVE" };
+      },
+      deployConfig: {
+        digitaloceanToken: "token",
+        deployStagingAppId: "app-staging",
+      },
+    });
+    await handler({
+      client: { chat: { postMessage: async (message) => posts.push(message) } },
+      command: { text: "deploy staging", user_id: "U123", channel_id: "C_DEPLOY" },
+      ack: async () => {},
+      respond: async (message) => {
+        if (expired) throw new Error("expired_url");
+        responses.push(message);
+      },
+    });
+    assert.equal(responses.length, 1);
+    assert.equal(posts.length, 1);
+    assert.equal(posts[0].channel, "C_DEPLOY");
+    assert.equal(posts[0].response_type, undefined);
+    assert.match(readResponseText(posts[0]), fails
+      ? /<!here> Deployment dep-long failed after trigger: deployment errored/
+      : /Deployment dep-long finished successfully with phase ACTIVE/);
+    assert.ok(readSlackBlocks(posts[0]).length > 0);
+  });
+}

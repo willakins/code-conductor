@@ -76,7 +76,17 @@ function registerCalypsoCommand(app, options = {}) {
         executionResult,
         communicationClient: client,
         communicationProvider: options.communicationProvider,
-        respond: sendResponse,
+        respond: (response) => sendDeploymentCompletionResponse({
+          client,
+          channelId: currentChannelId,
+          userId,
+          communicationProvider: options.communicationProvider,
+          response,
+          respond: sendResponse,
+        }),
+      }).catch((error) => {
+        console.error(`Failed to send deployment completion notification for ${executionResult.externalDeploymentId}.`);
+        console.error(error.message);
       });
     } catch (error) {
       console.error(`Failed to process ${resolveBotCommandPrefix(botName)} command.`);
@@ -135,6 +145,27 @@ async function sendCommunicationResponse({
   );
 }
 
+async function sendDeploymentCompletionResponse({
+  client,
+  channelId,
+  userId,
+  communicationProvider,
+  response,
+  respond,
+}) {
+  if (String(communicationProvider || "").trim().toLowerCase() !== "slack" || !channelId) {
+    await respond(response);
+    return;
+  }
+
+  const { response_type: responseType, ...message } = response;
+  if (responseType === "ephemeral") {
+    await client.chat.postEphemeral({ channel: channelId, user: userId, ...message });
+    return;
+  }
+  await client.chat.postMessage({ channel: channelId, ...message });
+}
+
 async function sendDeploymentCompletionFollowUpIfNeeded({
   calypsoCommandService,
   communicationClient,
@@ -172,6 +203,7 @@ async function sendDeploymentCompletionFollowUpIfNeeded({
     return;
   }
 
+  let response;
   try {
     const { completionState, deploymentRun, finalizationResult } = await completionWork;
     const deployEnvironment =
@@ -195,7 +227,7 @@ async function sendDeploymentCompletionFollowUpIfNeeded({
       userId,
     });
 
-    await respond(buildCommandResponse({
+    response = buildCommandResponse({
       communicationProvider,
       responseType: executionResult.followUpResponseType || executionResult.responseType,
       text: successText,
@@ -207,13 +239,13 @@ async function sendDeploymentCompletionFollowUpIfNeeded({
         externalDeploymentId,
         finalizationResult,
       }),
-    }));
+    });
   } catch (error) {
     const failureText = buildDeploymentCompletionFailureText({
       externalDeploymentId,
       error,
     });
-    await respond(buildCommandResponse({
+    response = buildCommandResponse({
       communicationProvider,
       responseType: executionResult.followUpResponseType || executionResult.responseType,
       text: failureText,
@@ -221,8 +253,9 @@ async function sendDeploymentCompletionFollowUpIfNeeded({
         externalDeploymentId,
         error,
       }),
-    }));
+    });
   }
+  await respond(response);
 }
 
 function buildCommandResponse({

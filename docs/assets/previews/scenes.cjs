@@ -111,7 +111,10 @@ async function deploymentMessage() {
       text: "deploy prod confirm preview-token", user_id: "U_JORDAN", user_name: "jordan",
       channel_id: "C_DEPLOYMENTS", channel_name: "deployments",
     },
-    client: { conversations: { info: async () => ({ channel: { topic: { value: "Production: 🟢" } } }) } },
+    client: {
+      chat: { postMessage: async (message) => responses.push(message) },
+      conversations: { info: async () => ({ channel: { topic: { value: "Production: 🟢" } } }) },
+    },
   });
   const message = responses.find((response) =>
     response.attachments?.[0]?.blocks?.[0]?.text?.text === "✅ Production deployment complete");

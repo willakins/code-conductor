@@ -44,7 +44,7 @@ test("operational previews retain the blocked readiness and completed-deploy out
   assert.match(JSON.stringify(readiness), /Blocked.*1 required test/);
   assert.match(JSON.stringify(readiness), /Mark #187 tested/);
   const deployment = scenes.find((scene) => scene.slug === "automated-deploy").message;
-  assert.equal(deployment.response_type, "in_channel");
+  assert.equal(deployment.channel, "C_DEPLOYMENTS");
   assert.equal(deployment.attachments[0].blocks[0].text.text, "✅ Production deployment complete");
   assert.match(JSON.stringify(deployment), /Completed in 4m 12s/);
   assert.match(JSON.stringify(deployment), /Healthy · HTTP 200/);
