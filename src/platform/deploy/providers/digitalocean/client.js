@@ -40,7 +40,6 @@ function createDigitalOceanClient({ token }) {
           continue;
         }
         retryDelayMs = pollIntervalMs;
-        lastKnownPhase = deploymentState.phase;
 
         if (deploymentState.phase === "ACTIVE") {
           return deploymentState;
