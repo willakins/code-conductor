@@ -1151,6 +1151,9 @@ Rules:
 - If deploy fails:
   - does not write deployment row
   - does not mark PRs deployed
+- DigitalOcean deployment status checks retry HTTP 408, 429, 5xx, and network failures
+  with exponential backoff capped at 60 seconds until a terminal deployment phase is observed.
+  Retries monitor the same deployment and never repeat the deployment trigger.
 - After trigger, Code Conductor sends a follow-up message when the deploy provider finishes the deployment.
   Slack completion messages use the bot API in the originating channel, so deployments that outlast
   the original command response URL can still announce success or failure.
