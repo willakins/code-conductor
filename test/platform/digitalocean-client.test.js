@@ -197,3 +197,63 @@ for (const terminalPhase of ["ACTIVE", "ERROR", "CANCELED"]) {
     }
   });
 }
+for (const failure of [408, 429, 500, 502, 503, 504, "network"]) {
+  test(`deployment monitoring recovers from ${failure} without triggering another deployment`, async () => {
+    let requests = 0;
+    await withMockedFetch(async (url, init) => {
+      assert.equal(init.method, "GET");
+      assert.equal(url, "https://api.digitalocean.com/v2/apps/app-123/deployments/dep-123");
+      requests += 1;
+      if (requests <= 2) {
+        if (failure === "network") throw new TypeError("fetch failed");
+        return { ok: false, status: failure, text: async () => "temporary error" };
+      }
+      return { ok: true, json: async () => ({ deployment: { id: "dep-123", phase: "ACTIVE" } }) };
+    }, async () => {
+      const client = createDigitalOceanClient({ token: "token" });
+      assert.deepEqual(await client.waitForAppDeploymentCompletion("app-123", "dep-123", {
+        pollIntervalMs: 1,
+      }), { id: "dep-123", phase: "ACTIVE" });
+      assert.equal(requests, 3);
+    });
+  });
+}
+
+test("deployment monitoring still reports a real failure after a transient API error", async () => {
+  let requests = 0;
+  await withMockedFetch(async () => {
+    requests += 1;
+    if (requests === 1) return { ok: false, status: 500, text: async () => "temporary" };
+    return { ok: true, json: async () => ({ deployment: { phase: "ERROR" } }) };
+  }, async () => {
+    const client = createDigitalOceanClient({ token: "token" });
+    await assert.rejects(client.waitForAppDeploymentCompletion("app", "dep", { pollIntervalMs: 1 }),
+      /finished with phase ERROR/);
+    assert.equal(requests, 2);
+  });
+});
+
+test("deployment monitoring does not retry authorization failures", async () => {
+  let requests = 0;
+  await withMockedFetch(async () => {
+    requests += 1;
+    return { ok: false, status: 403, text: async () => "forbidden" };
+  }, async () => {
+    const client = createDigitalOceanClient({ token: "token" });
+    await assert.rejects(client.waitForAppDeploymentCompletion("app", "dep", { pollIntervalMs: 1 }),
+      /403.*forbidden/);
+    assert.equal(requests, 1);
+  });
+});
+
+test("deployment trigger is not retried after a server error", async () => {
+  let requests = 0;
+  await withMockedFetch(async () => {
+    requests += 1;
+    return { ok: false, status: 500, text: async () => "temporary" };
+  }, async () => {
+    const client = createDigitalOceanClient({ token: "token" });
+    await assert.rejects(client.triggerAppDeployment("app"), /500/);
+    assert.equal(requests, 1);
+  });
+});

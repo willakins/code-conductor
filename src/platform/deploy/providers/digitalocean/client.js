@@ -27,9 +27,19 @@ function createDigitalOceanClient({ token }) {
       ensureRequiredValueExists(deploymentId, "external deployment id");
 
       const pollIntervalMs = readPositiveInteger(options.pollIntervalMs, 10000);
+      let retryDelayMs = pollIntervalMs;
 
       while (true) {
-        const deploymentState = await fetchDeploymentState({ token, appId, deploymentId });
+        let deploymentState;
+        try {
+          deploymentState = await fetchDeploymentState({ token, appId, deploymentId });
+        } catch (error) {
+          if (!error.retryableStatusCheck) throw error;
+          await sleep(Math.min(retryDelayMs, 60000));
+          retryDelayMs = Math.min(retryDelayMs * 2, 60000);
+          continue;
+        }
+        retryDelayMs = pollIntervalMs;
 
         if (deploymentState.phase === "ACTIVE") {
           return deploymentState;
@@ -82,7 +92,11 @@ async function throwIfDeploymentRequestFailed(response) {
   }
 
   const responseBody = await response.text();
-  throw new Error(`DigitalOcean deploy failed (${response.status}): ${responseBody}`);
+  const error = new Error(`DigitalOcean deploy failed (${response.status}): ${responseBody}`);
+  error.retryableStatusCheck = response.status === 408
+    || response.status === 429
+    || (response.status >= 500 && response.status <= 599);
+  throw error;
 }
 
 function readExternalDeploymentId(payload) {
@@ -91,16 +105,23 @@ function readExternalDeploymentId(payload) {
 }
 
 async function fetchDeploymentState({ token, appId, deploymentId }) {
-  const response = await fetch(
-    `https://api.digitalocean.com/v2/apps/${appId}/deployments/${deploymentId}`,
-    {
-      method: "GET",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json",
+  let response;
+  try {
+    response = await fetch(
+      `https://api.digitalocean.com/v2/apps/${appId}/deployments/${deploymentId}`,
+      {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
       },
-    },
-  );
+    );
+  } catch (error) {
+    // Fetch rejects on transport failures; retry only the read, never the trigger POST.
+    error.retryableStatusCheck = true;
+    throw error;
+  }
   await throwIfDeploymentRequestFailed(response);
 
   const payload = await response.json();
